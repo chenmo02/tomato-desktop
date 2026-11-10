@@ -1,0 +1,25 @@
+# Allow only the source tree and curated project documentation.
+/*
+!/.gitignore
+!/.gitattributes
+!/README.md
+!/native/
+!/docs/
+**/bin/
+**/obj/
+**/.vs/
+**/*.user
+**/*.suo
+/native/artifacts/
+/native/test-results/
+**/.env
+**/.env.*
+**/*.pfx
+**/*.p12
+**/vault/
+**/.DesktopNookVault/
+**/state.json
+**/state.json.bak
+**/migration.json
+**/instance.pid
+**/category-map.json

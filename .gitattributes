@@ -1,0 +1,11 @@
+* text=auto
+*.cs text eol=crlf
+*.xaml text eol=crlf
+*.csproj text eol=crlf
+*.props text eol=crlf
+*.ps1 text eol=crlf
+*.md text eol=lf
+*.png binary
+*.ico binary
+# The Unicode NSIS script is UTF-16; preserve its bytes.
+*.nsi binary
