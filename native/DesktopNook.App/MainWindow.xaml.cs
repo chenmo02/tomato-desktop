@@ -5,9 +5,11 @@ using System.Windows;
 using System.Windows.Automation;
 using System.Windows.Controls;
 using System.Windows.Input;
+using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Shell;
+using System.Windows.Threading;
 using DesktopNook.Core;
 
 namespace DesktopNook.App;
@@ -52,6 +54,18 @@ public partial class MainWindow : Window
     // 拖放期间/刚结束时禁止「失活自动收起」，避免拖图标时整个面板消失。
     private DateTime _hideGuardUntil;
     private bool _manualPlacement; private double _manualLeft; private double _manualTop;
+    // 跨屏 DPI 刷新是高频消息（WM_WINDOWPOSCHANGED 每次移动都发），合并成一次延后操作。
+    private bool _regionRefreshQueued;
+    private bool _dpiLayoutRefreshQueued;
+    // 自检用：记录 DPI 布局刷新真正执行的次数，验证 Win32 消息钩子确实接上了。
+    internal static int DpiLayoutRefreshCount { get; private set; }
+    // 自检用：捕获 SourceInitialized 阶段背板声明的结果，用于定位启动态与
+    // 窗口渲染完成后的状态差异（合成目标 / DWM 可能尚未就绪）。
+    internal static string? BackdropStatusAtSourceInitialized { get; private set; }
+    internal static BackdropKind BackdropKindAtSourceInitialized { get; private set; } = BackdropKind.None;
+    // 自检用：首帧后的背板收敛只应执行一次。
+    internal static int BackdropSettleCount { get; private set; }
+    private bool _backdropSettled;
     // 侧边栏分类行的选中态只体现在颜色上：字重、内边距、边框厚度恒定，行宽不会变化。
     // 当前分类同时由右侧内容标题与底部状态栏（如「全部 · 1 个图标」）提示。
     public bool KeepOpenForVerification { get; set; }
@@ -75,18 +89,30 @@ public partial class MainWindow : Window
             GlassFrameThickness=new Thickness(-1),ResizeBorderThickness=new Thickness(0),
             CaptionHeight=0,CornerRadius=new CornerRadius(0),UseAeroCaptionButtons=false
         });
-        SourceInitialized+=(_,_)=>ApplyBackdrop();
+        SourceInitialized+=(_,_)=>
+        {
+            ApplyBackdrop();
+            BackdropStatusAtSourceInitialized=BackdropService.Status;
+            BackdropKindAtSourceInitialized=BackdropService.Current;
+            // WPF 的 SizeChanged 只在 DIP 尺寸变化时触发，而跨屏 DPI 变化往往
+            // 恰好保持 DIP 尺寸不变、只把 HWND 物理尺寸放大；必须在 Win32
+            // 消息层兜底，否则 SetWindowRgn 的旧 HRGN 会一直裁着窗口。
+            var hwnd=new WindowInteropHelper(this).Handle;
+            HwndSource.FromHwnd(hwnd)?.AddHook(WindowMessageHook);
+        };
         // 窗口形状跟随皮肤圆角与 Viewbox 缩放；尺寸/DPI 变化后必须重裁，
         // 否则 DWM 背板会在四角画出未经玻璃覆盖的直角色块。
-        SizeChanged+=(_,_)=>ApplyWindowRegion();
-        DpiChanged+=(_,_)=>ApplyWindowRegion();
+        SizeChanged+=(_,_)=>QueueRegionRefresh();
+        StateChanged+=(_,_)=>{QueueRegionRefresh();SettleBackdropAfterFirstFrame();};
+        DpiChanged+=(_,_)=>{QueueRegionRefresh();QueueDpiLayoutRefresh();};
+        ContentRendered+=(_,_)=>SettleBackdropAfterFirstFrame();
         InitializeComponent();
         // 侧栏版本文字跟随程序集版本，避免 XAML 里的占位值与 csproj 脱节。
         VersionLabel.Text="番茄桌面 · 版本 "+ProductVersion;
         // 主题必须在窗口布局前应用：App.xaml 里的画刷是共享实例，改色后所有控件同步生效。
         Settings=App.Options.ReadSettings();
         ThemeService.Apply(Settings);
-        ApplyWindowIcon();InitializeGlass();ApplySkinVisual(false);InitializeSizing();
+        ApplyWindowIcon();InitializeGlass();ApplySkinVisual(false);SyncZoomButton();InitializeSizing();
         _undo=new UndoService(App.Store.DataDirectory);
         _autoCollect=new AutoCollectService(()=>App.Store,count=>
             Dispatcher.BeginInvoke(new Action(()=>{Render();SetStatus("已自动收纳 "+count+" 个新项目到未分类");})));
@@ -118,6 +144,69 @@ public partial class MainWindow : Window
         }
         catch{/* ICO 资源不可用时沿用 XAML 指定的 PNG 图标 */}
     }
+    private const int WmSize=0x0005,WmWindowPosChanged=0x0047,WmDpiChanged=0x02E0;
+    // WM_DPICHANGED 由 WPF 转成 DpiChanged 事件，但 WPF 是在同一条消息里稍后才
+    // 把 HWND 缩放到新的物理矩形。同步在事件里重裁区域读到的还是旧矩形，
+    // 所以这里只排队、把真正的工作延后到本轮消息处理结束之后。
+    private IntPtr WindowMessageHook(IntPtr hwnd,int msg,IntPtr wParam,IntPtr lParam,ref bool handled)
+    {
+        if(msg is WmSize or WmWindowPosChanged or WmDpiChanged)QueueRegionRefresh();
+        if(msg==WmDpiChanged)QueueDpiLayoutRefresh();
+        return IntPtr.Zero;
+    }
+    private void QueueRegionRefresh()
+    {
+        if(_regionRefreshQueued)return;
+        _regionRefreshQueued=true;
+        Dispatcher.BeginInvoke(DispatcherPriority.Background,new Action(()=>
+        {
+            _regionRefreshQueued=false;
+            ApplyWindowRegion();
+        }));
+    }
+    // 让冷启动等价于「进设置切换一次 UI」后的状态。
+    // WindowChrome 会在窗口显示时重新设置 DWM 帧边距，可能覆盖 SourceInitialized
+    // 阶段的背板声明；DWM 也常要到首帧完成后才为 HWND 建立系统背板合成。
+    // 因此首帧后先撤销再重设材质，强制 DWM 重新评估，再按最终状态重建自绘层。
+    private void SettleBackdropAfterFirstFrame()
+    {
+        if(_backdropSettled)return;
+        _backdropSettled=true;
+        BackdropSettleCount++;
+        Dispatcher.BeginInvoke(DispatcherPriority.ContextIdle,new Action(()=>
+        {
+            // 两次 API 调用在同一个 dispatcher 回调内完成，DWM 只呈现最终状态，
+            // 不会出现可见的中间帧或闪烁。
+            var expected=ThemeService.IsGlass?BackdropKind.Acrylic:BackdropKind.Mica;
+            if(BackdropService.Current==expected)BackdropService.Apply(this,BackdropKind.None);
+            ApplyBackdrop();
+            // 开机自启时窗口一开始就最小化：只收敛 DWM 材质声明，不把壁纸层加载回来。
+            if(_resourcesSuspended)return;
+            ResyncSkinBackdrop();
+            UpdateGlassClip();
+            ApplyWindowRegion();
+        }));
+    }
+    private void QueueDpiLayoutRefresh()
+    {
+        if(_dpiLayoutRefreshQueued)return;
+        _dpiLayoutRefreshQueued=true;
+        Dispatcher.BeginInvoke(DispatcherPriority.Background,new Action(()=>
+        {
+            _dpiLayoutRefreshQueued=false;
+            DpiLayoutRefreshCount++;
+            // DIP 尺寸可能没变，SizeChanged 不会来：显式重算内容层尺寸、圆角裁剪
+            // 与壁纸对齐，并重新声明透明清屏色 + DWM 背板，避免合成层停留在旧 DPI。
+            UpdateSizingLayout();
+            UpdateGlassClip();
+            UpdateSkinBackdropViewbox();
+            ApplyBackdrop();
+            ApplyWindowRegion();
+            Surface.InvalidateVisual();
+            InvalidateVisual();
+        }));
+    }
+
     // Surface 位于 Viewbox 内，圆角半径要按实际缩放换算成窗口坐标再裁 HWND。
     internal void ApplyWindowRegion()
     {
@@ -141,10 +230,56 @@ public partial class MainWindow : Window
         UpdateSkinBackdropViewbox();
         ApplyHotKey();
         _autoCollect?.SetEnabled(Settings.AutoCollect);
+        // 开机自启时窗口初始就是最小化，StateChanged 未必在 Show() 前触发；
+        // 显式同步一次挂起状态，保证「启动即驻留后台」这条路径同样不保留大对象。
+        if(WindowState==WindowState.Minimized)SuspendIdleResources();
         // 失效检测放到后台优先级，不占用首次显示；解析快捷方式需要 UI 线程 STA。
         Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Background,new Action(ScanBroken));
+        // 启动与数据变更只同步展示目录里的快捷方式；「固定到快速访问」由安装流程
+        // --maintenance=shortcut 完成，避免每次启动都改写用户的资源管理器设置。
+        Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Background,new Action(()=>
+        {
+            try{ExplorerNavService.Sync(Store.DataDirectory,Store);}catch{}
+        }));
         if(Store.RecoveryMessages.Count>0) SetStatus(Store.RecoveryMessages.Last());
         if(!App.IsSandbox&&OnlineUpdater.Enabled)_=CheckOnlineUpdateAsync(false);
+        // TEMP layout probe (removed after diagnosis)
+        var probe=Environment.GetCommandLineArgs();var probeIndex=Array.IndexOf(probe,"--dump-layout");
+        if(probeIndex>=0&&probeIndex+1<probe.Length)
+            Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Background,new Action(async()=>
+            {
+                await System.Threading.Tasks.Task.Delay(800);
+                var zoomIndex=Array.IndexOf(probe,"--probe-zoom");
+                if(zoomIndex>=0&&zoomIndex+1<probe.Length&&double.TryParse(probe[zoomIndex+1],out var zoom)&&zoom>1)
+                {
+                    Width=WindowSizePreference.BaseWidth*zoom;Height=WindowSizePreference.BaseHeight*zoom;
+                    UpdateSizingLayout();
+                    await System.Threading.Tasks.Task.Delay(600);
+                }
+                ShowSettingsView();
+                await System.Threading.Tasks.Task.Delay(400);
+                var shot=new RenderTargetBitmap((int)Math.Ceiling(ActualWidth),(int)Math.Ceiling(ActualHeight),96,96,PixelFormats.Pbgra32);
+                shot.Render(this);
+                var encoder=new PngBitmapEncoder();encoder.Frames.Add(BitmapFrame.Create(shot));
+                using(var image=File.Create(Path.ChangeExtension(probe[probeIndex+1],".png")))encoder.Save(image);
+                try{ScreenCapture.Save(Path.GetDirectoryName(probe[probeIndex+1])!,"real-settings-glass.png");}catch{}
+                var dpi=VisualTreeHelper.GetDpi(this);
+                var transform=Surface.TransformToAncestor(this);
+                var origin=transform.Transform(new Point(0,0));var unit=transform.Transform(new Point(1,0));
+                var scale=Math.Abs(unit.X-origin.X);
+                File.WriteAllLines(probe[probeIndex+1],new[]{
+                    $"Window Width={Width} Height={Height} Actual={ActualWidth}x{ActualHeight}",
+                    $"DPI={dpi.DpiScaleX}",
+                    $"Surface Width={Surface.Width} Height={Surface.Height} Actual={Surface.ActualWidth}x{Surface.ActualHeight} ViewboxScale={scale}",
+                    $"GlassRoot Actual={GlassRoot.ActualWidth}x{GlassRoot.ActualHeight}",
+                    $"Workspace Actual={Workspace.ActualWidth}x{Workspace.ActualHeight}",
+                    $"SettingsSurface Actual={SettingsSurface.ActualWidth}x{SettingsSurface.ActualHeight}",
+                    $"SettingsGroups Actual={SettingsGroups.ActualWidth}x{SettingsGroups.ActualHeight}",
+                    $"HwndBounds(logical)={TaskbarPlacement.Bounds(this)}",
+                    $"SizePref={SizePreference}"
+                });
+                Application.Current.Shutdown();
+            }));
     }
     private async void Place()
     {
@@ -203,9 +338,82 @@ public partial class MainWindow : Window
         }
         return false;
     }
-    public void ShowPanel() { WindowState=WindowState.Normal; Show(); Place(); Activate(); }
-    public void TogglePanel(){if(WindowState==WindowState.Normal&&IsVisible)WindowState=WindowState.Minimized;else ShowPanel();}
-    private void OnStateChanged(object? sender,EventArgs e) { if(WindowState==WindowState.Normal) Place(); }
+    // 标题栏按钮状态复位：① 清掉点击后残留的键盘焦点（窗口最小化/恢复时 WPF 会
+    // 还原上次焦点，让按钮长期显示 WinHover 整块底色）；② 让 WPF 按当前鼠标位置重新
+    // 做命中测试，解决窗口移动、SetWindowPos 贴任务栏或最小化恢复后收不到
+    // WM_MOUSELEAVE，IsMouseOver 与 ToolTip 一直挂在按钮上（关闭按钮常驻红底）的问题。
+    private void ResetCaptionState()
+        =>Dispatcher.BeginInvoke(DispatcherPriority.Background,new Action(()=>
+        {
+            Keyboard.ClearFocus();
+            Mouse.Synchronize();
+        }));
+    public void ShowPanel() { WindowState=WindowState.Normal; Show(); Place(); Activate(); ResetCaptionState(); }
+    public void TogglePanel(){if(WindowState!=WindowState.Minimized&&IsVisible)WindowState=WindowState.Minimized;else ShowPanel();}
+    // 面板长期驻留后台时，只保留「随时能被唤起」所需的状态：释放玻璃壁纸位图、
+    // 模糊背景层、「全部图标」页上百个卡片控件和图标缓存里的冷门尺寸。收纳数据、
+    // 分类、窗口位置与设置全部保留；恢复显示时按原路径重建，不改变交互语义。
+    private bool _resourcesSuspended;
+    internal bool ResourcesSuspended=>_resourcesSuspended;
+    private void SuspendIdleResources()
+    {
+        // UI 自检需要观察完整视觉树，验证模式下不挂起。
+        if(_resourcesSuspended||KeepOpenForVerification)return;
+        _resourcesSuspended=true;
+        ReleaseBackdropVisuals();
+        ReleaseCatalogVisuals();
+        ShellIntegration.TrimForIdle();
+        _autoCollect?.SetBackgroundMode(true);
+    }
+    private void ResumeIdleResources()
+    {
+        if(!_resourcesSuspended)return;
+        _resourcesSuspended=false;
+        _autoCollect?.SetBackgroundMode(false);
+        // 背景层同步恢复：面板重新可见的第一帧就应该是正确的皮肤，不留空白帧。
+        RestoreBackdropVisuals();
+        // 图标库卡片可能有上百个，放到后台优先级重建，避免挡住面板打开。
+        Dispatcher.BeginInvoke(DispatcherPriority.Background,new Action(RestoreCatalogVisuals));
+    }
+    private void OnStateChanged(object? sender,EventArgs e)
+    {
+        ResetCaptionState();
+        if(WindowState==WindowState.Minimized)SuspendIdleResources();else ResumeIdleResources();
+        // 全屏时 HWND 形状交给系统：旧 HRGN 是 Normal 尺寸的圆角，不撤会把窗口裁掉一大块。
+        if(WindowState==WindowState.Maximized)BackdropService.ClearRoundedRegion(this);
+        else ApplyWindowRegion();
+        UpdateCaptionCornerRadius();
+        SyncZoomButton();
+        UpdateSizingLayout();
+        if(WindowState==WindowState.Normal)Place();
+    }
+    // 最大化窗口是直角，标题栏最右侧按钮的圆角必须归零；还原后跟随皮肤圆角。
+    internal void UpdateCaptionCornerRadius()
+    {
+        var radius=WindowState==WindowState.Maximized?0d:Surface.CornerRadius.TopLeft;
+        // Surface 位于 Viewbox 内：ApplyWindowRegion 裁 HWND 用的是 radius*scale，
+        // 关闭按钮红色悬停块的右上角必须取同一个值，否则缩放窗口后会被 HRGN 裁出缺角。
+        var scale=1d;
+        try
+        {
+            var transform=Surface.TransformToAncestor(this);
+            var a=transform.Transform(new Point(0,0));
+            var b=transform.Transform(new Point(1,0));
+            scale=Math.Abs(b.X-a.X);
+            if(scale<=0)scale=1;
+        }
+        catch{/* 视觉树尚未完成布局时用 1，与构造阶段行为一致 */}
+        Application.Current.Resources["WinCaptionCornerRadius"]=new CornerRadius(0,radius*scale,0,0);
+    }
+    // 方框按钮在「最大化」与「向下还原」之间切换图标、提示与自动化名称。
+    private void SyncZoomButton()
+    {
+        if(ZoomButton is null)return;
+        var maximized=WindowState==WindowState.Maximized;
+        ZoomGlyph.Style=(Style)FindResource(maximized?"WinGlyphRestore":"WinGlyphMaximize");
+        ZoomButton.ToolTip=maximized?"向下还原":"最大化";
+        AutomationProperties.SetName(ZoomButton,maximized?"向下还原":"最大化");
+    }
     [System.Runtime.InteropServices.DllImport("user32.dll")]
     private static extern short GetAsyncKeyState(int key);
     private static bool PointerPressed()=>(GetAsyncKeyState(0x01)&0x8000)!=0;
@@ -216,6 +424,7 @@ public partial class MainWindow : Window
     }
     private void OnDeactivated(object? sender,EventArgs e)
     {
+        ResetCaptionState();
         // 偏好默认关闭：失焦不自动收起，面板保持显示，只能由 × / 热键 / 任务栏按钮手动收起。
         if(!Settings.AutoHideOnDeactivate)return;
         if(TaskbarPlacement.PointerOverButton())return;
@@ -245,15 +454,14 @@ public partial class MainWindow : Window
         if(_dragging||_interactions>0)return;
         if(App.Options.CloseEndsProcess){_allowExit=true;e.Cancel=false;Dispatcher.BeginInvoke(()=>Application.Current.Shutdown());}else WindowState=WindowState.Minimized;
     }
-    private void OnCloseButton(object sender,RoutedEventArgs e)=>Close();
-    private void OnMinimizeButton(object sender,RoutedEventArgs e)=>WindowState=WindowState.Minimized;
-    // macOS 绿灯语义：展开「窗口大小」菜单，替代系统级最大化（面板默认贴任务栏显示）。
+    private void OnCloseButton(object sender,RoutedEventArgs e){ResetCaptionState();Close();}
+    private void OnMinimizeButton(object sender,RoutedEventArgs e){ResetCaptionState();WindowState=WindowState.Minimized;}
+    // 标题栏方框按钮：点击直接最大化，再点还原，不再弹出尺寸选择菜单。
+    // 尺寸预设、锁定宽高比与「贴回任务栏」仍保留在「更多 → 窗口大小」。
     internal void OnZoomButton(object sender,RoutedEventArgs e)
     {
-        // 子项来自临时 MenuItem，Popup 会先断开旧逻辑父级再挂到 ContextMenu。
-        var items=new List<object>();
-        foreach(var item in WindowSizeMenu().Items)items.Add(item);
-        Popup((FrameworkElement)sender,items);
+        ResetCaptionState();
+        WindowState=WindowState==WindowState.Maximized?WindowState.Normal:WindowState.Maximized;
     }
     public void Quit() { _allowExit=true; Application.Current.Shutdown(); }
     internal void QuitForMaintenance(){if(!_dragging&&_interactions==0)Quit();}
@@ -265,6 +473,22 @@ public partial class MainWindow : Window
         SyncTabs();
         UpdateTabSelection();
         RefreshIcons();
+        ScheduleNavSync();
+    }
+    // 数据变更后合并成一次资源管理器入口同步，收纳 / 移回 / 改名 / 分类变化都能跟上。
+    private DispatcherTimer? _navSyncTimer;
+    private void ScheduleNavSync()
+    {
+        if(_navSyncTimer is null)
+        {
+            _navSyncTimer=new DispatcherTimer(DispatcherPriority.Background){Interval=TimeSpan.FromMilliseconds(400)};
+            _navSyncTimer.Tick+=(_,_)=>
+            {
+                _navSyncTimer.Stop();
+                try{ExplorerNavService.Sync(Store.DataDirectory,Store);}catch{}
+            };
+        }
+        _navSyncTimer.Stop();_navSyncTimer.Start();
     }
     // 侧边栏选中的分类始终作为右侧内容标题；搜索只过滤显示，不改变收纳数据。
     // 图标一律按 ItemsSource 顺序交给 UniformGrid 排成紧凑网格，不再保存自由坐标。
@@ -882,8 +1106,41 @@ public partial class MainWindow : Window
             if(Math.Abs(delta.X)<SystemParameters.MinimumHorizontalDragDistance && Math.Abs(delta.Y)<SystemParameters.MinimumVerticalDragDistance)return;
             _dragMoved=true;_dragging=true;GuardHide(3000);
         }
+        var windowPoint=e.GetPosition(this);
+        bool outside=windowPoint.X<0||windowPoint.Y<0||windowPoint.X>ActualWidth||windowPoint.Y>ActualHeight;
+        // 越过面板边界且目标不是桌面：交给 OLE，浏览器 / 微信等外部程序才能收到文件。
+        // 桌面分支继续走 OnIconUp 的「移回桌面」，不改动原有语义。
+        if(outside&&!ShellIntegration.IsDesktopUnderCursor()){StartExternalDrag();e.Handled=true;return;}
         _dragButton.RenderTransform=new TranslateTransform(delta.X,delta.Y);
         e.Handled=true;
+    }
+    // 把内部鼠标手势切换成真正的 OLE 拖放。DoDragDrop 会接管鼠标消息泵，
+    // 因此先释放捕获并清空手势状态，OnIconUp 届时不会再处理同一个项目。
+    private void StartExternalDrag()
+    {
+        var button=_dragButton;var item=_dragItem;
+        if(button is null||item is null)return;
+        DataObject? data;
+        try{data=ExternalDrag.Build(item,Store.ManagedPath(item));}
+        catch{data=null;}
+        _dragButton=null;_dragItem=null;_dragMoved=false;
+        button.ReleaseMouseCapture();
+        button.RenderTransform=null;
+        if(data is null)
+        {
+            _dragging=false;GuardHide(1500);
+            SetStatus("图标仍保留在番茄桌面");
+            return;
+        }
+        _dragging=true;GuardHide(5000);
+        var effect=DragDropEffects.None;
+        try{effect=DragDrop.DoDragDrop(button,data,ExternalDrag.AllowedEffects);}
+        catch{/* 外部程序拒绝拖放时不影响面板 */}
+        finally
+        {
+            _dragging=false;_suppressUntil=DateTime.UtcNow.AddMilliseconds(250);GuardHide(1500);
+        }
+        SetStatus(effect==DragDropEffects.None?"图标仍保留在番茄桌面":"已提供给其它程序，文件仍由番茄桌面托管");
     }
     private void OnIconUp(object sender,MouseButtonEventArgs e)
     {

@@ -31,55 +31,52 @@ internal static class ShellIntegration
     private delegate bool EnumCallback(IntPtr hwnd,IntPtr param);
     [StructLayout(LayoutKind.Sequential)] private struct PointNative { public int X,Y; }
     [StructLayout(LayoutKind.Sequential,CharSet=CharSet.Unicode)] private struct ShellFileInfo { public IntPtr Icon; public int Index; public uint Attributes; [MarshalAs(UnmanagedType.ByValTStr,SizeConst=260)] public string Display; [MarshalAs(UnmanagedType.ByValTStr,SizeConst=80)] public string Type; }
-    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string,ImageSource> Icons = new(StringComparer.OrdinalIgnoreCase);
+    // 有界 LRU 缓存 + 空闲自动退出的 STA 解码池：驻留后台时不再保留两条常驻线程，
+    // 也不会因为 DPI / 缩放 / 图标库滚动不断累积新尺寸的位图。
+    private static readonly IconCache Icons=new();
+    private static readonly IconJobQueue IconJobs=new(ProcessIconJob);
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<string,bool> Loading=new();
     // 携带缓存键：一个图标解码完成后只通知对应控件，避免「一个图标就绪 → 上百个控件全部刷新」的 N² 广播风暴。
     public static event Action<string>? IconReady;
     internal static IntPtr VerificationDesktopHandle { get; set; }
     public static void SetAppId(string id) => Marshal.ThrowExceptionForHR(SetCurrentProcessExplicitAppUserModelID(id));
     public static ImageSource AppIcon { get; } = new BitmapImage(new Uri("pack://application:,,,/Assets/AppIcon.png"));
-    private static readonly System.Collections.Concurrent.BlockingCollection<(string Path,string Key,int Pixels,bool Fast)> IconJobs=new();
     internal static string IconKey(string path,bool recycle,int pixels,bool fast)
     {
         string resolved=recycle&&!fast?"::"+WindowsRecycleBin.RecycleId:path;
         return (fast?"fast|":"")+resolved+"|"+pixels;
     }
-    static ShellIntegration()
+    static ShellIntegration(){AppIcon.Freeze();}
+    private static void ProcessIconJob(IconJob job)
     {
-        AppIcon.Freeze();
-        // 两条 STA 线程并行解码：图标库首屏通常有几十个条目，单线程排队会让占位图标停留过久。
-        for(int i=0;i<2;i++)
-        {
-            int index=i;
-            var worker=new Thread(()=>
-            {
-                foreach(var job in IconJobs.GetConsumingEnumerable())
-                {
-                    try{Icons[job.Key]=(job.Fast?SharpIcons.LoadFast(job.Path,job.Pixels):SharpIcons.Load(job.Path,job.Pixels))??AppIcon;}
-                    catch {Icons[job.Key]=AppIcon;}
-                    finally{Loading.TryRemove(job.Key,out _);IconReady?.Invoke(job.Key);}
-                }
-            }){IsBackground=true,Name="DesktopNook shell icons "+(index+1)};
-            worker.SetApartmentState(ApartmentState.STA);worker.Start();
-        }
+        try{Icons.Add(job.Key,(job.Fast?SharpIcons.LoadFast(job.Path,job.Pixels):SharpIcons.Load(job.Path,job.Pixels))??AppIcon);}
+        catch{Icons.Add(job.Key,AppIcon);}
+        finally{Loading.TryRemove(job.Key,out _);IconReady?.Invoke(job.Key);}
     }
     public static ImageSource IconFor(string path,bool recycle=false,int pixels=96)
     {
         pixels=Math.Clamp(pixels,16,1024);
         string resolved=recycle?"::"+WindowsRecycleBin.RecycleId:path;
         string key=IconKey(resolved,false,pixels,false);
-        if(Icons.TryGetValue(key,out var cached))return cached;
-        if(Loading.TryAdd(key,true))IconJobs.Add((resolved,key,pixels,false));
+        if(Icons.TryGet(key,out var cached))return cached;
+        if(Loading.TryAdd(key,true))IconJobs.Enqueue(new IconJob(resolved,key,pixels,false));
         return AppIcon;
     }
     public static ImageSource IconForFast(string path,int pixels=96)
     {
         pixels=Math.Clamp(pixels,16,1024);
         string key=IconKey(path,false,pixels,true);
-        if(Icons.TryGetValue(key,out var cached))return cached;
-        if(Loading.TryAdd(key,true))IconJobs.Add((path,key,pixels,true));
+        if(Icons.TryGet(key,out var cached))return cached;
+        if(Loading.TryAdd(key,true))IconJobs.Enqueue(new IconJob(path,key,pixels,true));
         return AppIcon;
     }
+
+    internal readonly record struct ResourceSnapshot(int CacheCount,long CacheBytes,long CacheBudget,int ActiveWorkers,int PendingJobs,int LoadingCount,long ProcessedJobs);
+    internal static ResourceSnapshot Snapshot()=>new(Icons.Count,Icons.Bytes,Icons.Budget,IconJobs.ActiveWorkers,IconJobs.PendingCount,Loading.Count,IconJobs.ProcessedCount);
+    // 面板收起时调用：把图标缓存压到预算的三分之一左右，UI 仍持有当前显示图标的 Source。
+    internal static void TrimForIdle(double fraction=.35)=>Icons.TrimForIdle(fraction);
+    internal static void SetWorkerIdleForVerification(TimeSpan idle)=>IconJobs.SetIdleTimeout(idle);
+    internal static void EnqueueForVerification(IconJob job)=>IconJobs.Enqueue(job);
     public static void Launch(NookStore store,NookItem item)
     {
         if(item.Kind=="recycle-bin"){Process.Start(new ProcessStartInfo("explorer.exe","shell:::"+WindowsRecycleBin.RecycleId){UseShellExecute=true});return;}

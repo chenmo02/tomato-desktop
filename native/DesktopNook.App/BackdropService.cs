@@ -41,6 +41,8 @@ internal static class BackdropService
     private static extern int SetWindowRgn(IntPtr hwnd, IntPtr region, bool redraw);
     [DllImport("user32.dll")]
     private static extern bool GetWindowRect(IntPtr hwnd, out RectNative rect);
+    [DllImport("user32.dll")]
+    private static extern uint GetDpiForWindow(IntPtr hwnd);
     [StructLayout(LayoutKind.Sequential)]
     private struct RectNative { public int Left, Top, Right, Bottom; }
 
@@ -49,6 +51,16 @@ internal static class BackdropService
     public static bool TransparencyEnabled { get; private set; }
     // 窗口形状裁剪实际使用的圆角半径（DIP）：0 表示仍是系统默认的直角矩形。
     public static double RegionRadius { get; private set; }
+
+    // HRGN 的坐标是物理像素，而 Windows 在 WM_DPICHANGED 时只缩放窗口矩形、不会缩放
+    // 已经设好的 HRGN。跨屏 100%→150% 后窗口变成 1.5 倍大，旧 HRGN 仍只有原尺寸，
+    // WPF 内容就被裁在左上角 2/3；DWM 的 Mica/Acrylic 背板却仍铺满整个窗口，
+    // 于是出现「左上半张界面 + 右下角一片模糊壁纸」的撕裂画面。
+    // 记录上次真正生效的窗口矩形与像素半径，供延后刷新做幂等比较。
+    private static IntPtr _regionWindow;
+    private static int _regionWidth = -1, _regionHeight = -1, _regionRadiusPixels = -1;
+    // 供自检核对：最近一次 SetWindowRgn 成功时使用的物理窗口尺寸。
+    internal static Size LastRegionSize => new(Math.Max(0, _regionWidth), Math.Max(0, _regionHeight));
 
     // Acrylic 是否真正可见：API 调用成功但系统透明效果关闭时，DWM 只给纯色，
     // 此时必须继续显示自绘壁纸层，否则玻璃皮肤会退化成一块纯色面板。
@@ -86,7 +98,12 @@ internal static class BackdropService
     public static void ApplyRoundedRegion(Window window, double radiusDip)
     {
         // 诊断/应急回退：置为 1 时窗口恢复系统默认直角区域。
-        if (Environment.GetEnvironmentVariable("DESKTOPNOOK_NO_REGION") == "1") { RegionRadius = 0; return; }
+        if (Environment.GetEnvironmentVariable("DESKTOPNOOK_NO_REGION") == "1")
+        {
+            RegionRadius = 0;
+            ClearRoundedRegion(window);
+            return;
+        }
         if (window.WindowState != WindowState.Normal) return;
         var hwnd = new WindowInteropHelper(window).Handle;
         if (hwnd == IntPtr.Zero) return;
@@ -96,15 +113,41 @@ internal static class BackdropService
         if (!GetWindowRect(hwnd, out var rect)) return;
         var w = rect.Right - rect.Left;
         var h = rect.Bottom - rect.Top;
+        if (w <= 0 || h <= 0) return;
+        // 半径换算必须用 HWND 的真实 DPI：DPI 变化事件里 window.ActualWidth
+        // 可能仍是旧值，用 w/ActualWidth 反推比例会得到错误的圆角半径。
+        var dpi = GetDpiForWindow(hwnd);
         var logicalWidth = window.ActualWidth > 0 ? window.ActualWidth : window.Width;
-        if (w <= 0 || h <= 0 || logicalWidth <= 0) return;
-        var scale = w / logicalWidth;
-        var r = (int)Math.Clamp(Math.Round(radiusDip * scale), 1, Math.Min(w, h) / 2);
-        var region = CreateRoundRectRgn(0, 0, w + 1, h + 1, r * 2, r * 2);
+        var scale = dpi > 0 ? dpi / 96d : (logicalWidth > 0 ? w / logicalWidth : 1d);
+        if (!double.IsFinite(scale) || scale <= 0) scale = 1;
+        var radiusPixels = (int)Math.Clamp(Math.Round(radiusDip * scale), 1, Math.Min(w, h) / 2);
+        // 窗口每次移动都会发 WM_WINDOWPOSCHANGED；区域仍匹配时不要重复
+        // SetWindowRgn，避免无谓重绘与消息递归。矩形变了（跨屏 DPI 缩放）
+        // 或圆角变了（换皮肤）才会真正重设。
+        if (_regionWindow == hwnd && _regionWidth == w && _regionHeight == h
+            && _regionRadiusPixels == radiusPixels && RegionRadius > 0) return;
+        var region = CreateRoundRectRgn(0, 0, w + 1, h + 1, radiusPixels * 2, radiusPixels * 2);
         if (region == IntPtr.Zero) return;
         // SetWindowRgn 成功后 HRGN 归系统所有，不能再 DeleteObject。
         if (SetWindowRgn(hwnd, region, true) == 0) { DeleteObject(region); return; }
+        _regionWindow = hwnd;
+        _regionWidth = w;
+        _regionHeight = h;
+        _regionRadiusPixels = radiusPixels;
         RegionRadius = radiusDip;
+    }
+
+    // 最大化 / 最小化时窗口形状由系统接管，但 HRGN 不会自动失效：旧区域仍是
+    // Normal 尺寸的圆角，会把全屏窗口裁成左上角一小块。状态切换前必须撤掉，
+    // 恢复 Normal 时由 ApplyRoundedRegion 重新裁圆角。
+    public static void ClearRoundedRegion(Window window)
+    {
+        var hwnd = new WindowInteropHelper(window).Handle;
+        if (hwnd == IntPtr.Zero) return;
+        SetWindowRgn(hwnd, IntPtr.Zero, true);
+        _regionWindow = IntPtr.Zero;
+        _regionWidth = _regionHeight = _regionRadiusPixels = -1;
+        // RegionRadius 保留上次生效的 DIP 半径，供自检与皮肤断言使用。
     }
 
     // 必须在 SourceInitialized 之后调用（此时 HWND 才存在）。返回实际生效的材质。

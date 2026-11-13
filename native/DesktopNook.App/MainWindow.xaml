@@ -23,7 +23,7 @@
       </StackPanel>
       <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Stretch" HorizontalAlignment="Right">
        <Button Style="{StaticResource WinCaptionButton}" AutomationProperties.Name="最小化番茄" ToolTip="最小化" Click="OnMinimizeButton"><ContentControl Style="{StaticResource WinGlyphMinimize}"/></Button>
-       <Button Style="{StaticResource WinCaptionButton}" AutomationProperties.Name="窗口大小" ToolTip="窗口大小" Click="OnZoomButton"><ContentControl Style="{StaticResource WinGlyphMaximize}"/></Button>
+       <Button x:Name="ZoomButton" Style="{StaticResource WinCaptionButton}" AutomationProperties.Name="最大化" ToolTip="最大化" Click="OnZoomButton"><ContentControl x:Name="ZoomGlyph" Style="{StaticResource WinGlyphMaximize}"/></Button>
        <Button Style="{StaticResource WinCaptionCloseButton}" AutomationProperties.Name="关闭番茄" ToolTip="关闭番茄" Click="OnCloseButton"><ContentControl Style="{StaticResource WinGlyphClose}"/></Button>
       </StackPanel>
      </Grid>
@@ -63,7 +63,7 @@
         <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Top">
          <!-- 内容区检索框 -->
          <TextBox x:Name="IconSearch" Width="176" Height="32" Margin="0,0,8,0" Tag="搜索图标" Style="{StaticResource WinSearchBox}" ToolTip="搜索图标（输入后按回车直接打开）" TextChanged="OnIconSearch" KeyDown="OnIconSearchKeyDown"/>
-         <Button Style="{StaticResource WinCommandButton}" ToolTip="撤销上一步操作（Ctrl+Z）" Click="OnUndoButton" Margin="0,0,8,0"><ContentControl Style="{StaticResource WinGlyphBack}"/></Button>
+         <!-- 工具栏撤销图标已移除：撤销保留 Ctrl+Z、更多菜单与设置页入口 -->
          <Button Style="{StaticResource WinCommandButton}" AutomationProperties.Name="全部图标" AutomationProperties.AutomationId="Catalog" ToolTip="浏览全部图标：从开始菜单与系统应用里挑图标" Click="OnCatalogToggle" Margin="0,0,8,0"><ContentControl Style="{StaticResource WinGlyphGrid}"/></Button>
          <Button x:Name="CollectButton" Style="{StaticResource WinPrimaryButton}" AutomationProperties.AutomationId="Collect" Click="OnCollect" Margin="0,0,8,0">
           <StackPanel Orientation="Horizontal"><ContentControl Style="{StaticResource WinGlyphPlus}" Margin="0,0,7,0"/><TextBlock Text="喂给番茄" FontSize="12" FontWeight="SemiBold" Foreground="White" VerticalAlignment="Center"/></StackPanel>

@@ -14,7 +14,7 @@ internal static class OnlineUpdater
     // 填成新的 "owner/repo"（若资产名不同再改 AssetName），Enabled 自动变为 true，
     // 启动后台检查与“更多 → 检查在线更新”随即恢复，其余代码无需改动。
     internal const string Repository="";
-    internal const string AssetName="DesktopNook-win-x64.exe";
+    internal const string AssetName="DesktopNook-Setup.exe";
     internal static bool Enabled=>!string.IsNullOrWhiteSpace(Repository);
     internal static readonly Uri Latest=new($"https://api.github.com/repos/{Repository}/releases/latest");
     internal static HttpClient CreateClient()

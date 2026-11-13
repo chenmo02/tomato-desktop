@@ -116,7 +116,9 @@ public partial class MainWindow
         const double sidebarWidth=236,contentPadding=60,columnWidth=93,dpiTolerance=2;
         IconColumns=Math.Clamp((int)Math.Floor((Surface.Width-sidebarWidth-contentPadding+dpiTolerance)/columnWidth),4,30);
         foreach(var panel in FindVisualChildren<UniformGrid>(Icons))panel.Columns=IconColumns;
-        ResizeHandles.Visibility=_sizePreference.Free?Visibility.Visible:Visibility.Collapsed;
+        // 最大化时窗口由系统接管尺寸，自由缩放把手与角标必须隐藏。
+        var canResize=_sizePreference.Free&&WindowState==WindowState.Normal;
+        ResizeHandles.Visibility=canResize?Visibility.Visible:Visibility.Collapsed;
         ResizeHint.Visibility=ResizeHandles.Visibility;
     }
     // 磁贴高度 104px + 上下各 1px 外边距；拖动落点换算行号时与 XAML 保持一致。

@@ -2,6 +2,9 @@
   <Application.Resources>
     <!-- WinUI 3 浅色系统色板：所有底色 Alpha=FF。窗口是 AllowsTransparency=True 的分层窗口，
          不透明底才能完全挡住背后应用窗口；壁纸只由 Glass.cs 提供极淡色调，不显示图案。 -->
+    <!-- 标题栏最右侧按钮的右上角圆角：与 HWND 的 SetWindowRgn 半径保持一致，
+         否则关闭按钮悬停红底是直角，会被窗口圆角切掉一块。由 ApplySkinVisual / 最大化状态改写。 -->
+    <CornerRadius x:Key="WinCaptionCornerRadius">0,12,0,0</CornerRadius>
     <SolidColorBrush x:Key="WinWindowFill" Color="#FFF3F3F3"/>
     <SolidColorBrush x:Key="WinNavFill" Color="#FFF0F0F0"/>
     <SolidColorBrush x:Key="WinCardFill" Color="#FFFFFFFF"/>
@@ -161,6 +164,12 @@
     </Style>
     <!-- 弹窗次要按钮：白底 1px 中性描边、6px 圆角，与蓝色主操作成对出现。 -->
     <Style x:Key="WinSecondaryButton" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+      <!-- 本样式定义在隐式 Button 样式之前，BasedOn 的 StaticResource 无法前向解析，
+           会退回系统默认样式：深色主题下文字仍是黑色、压在深色卡片上完全看不清。
+           因此这里显式补齐隐式样式的三个属性，主题切换时由 DynamicResource 同步变浅。 -->
+      <Setter Property="Foreground" Value="{DynamicResource WinText}"/>
+      <Setter Property="FontFamily" Value="Segoe UI Variable Text, Segoe UI, Microsoft YaHei UI, Microsoft YaHei"/>
+      <Setter Property="Cursor" Value="Hand"/>
       <Setter Property="Height" Value="32"/><Setter Property="MinWidth" Value="80"/>
       <Setter Property="FontSize" Value="12"/><Setter Property="Padding" Value="12,6"/>
       <Setter Property="Background" Value="{DynamicResource WinCardFill}"/>
@@ -279,6 +288,13 @@
       <Setter Property="Width" Value="11"/><Setter Property="Height" Value="11"/><Setter Property="Focusable" Value="False"/>
       <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="ContentControl"><Rectangle Width="8" Height="8" Stroke="{Binding Foreground,RelativeSource={RelativeSource TemplatedParent}}" StrokeThickness="1.2" HorizontalAlignment="Center" VerticalAlignment="Center"/></ControlTemplate></Setter.Value></Setter>
     </Style>
+    <Style x:Key="WinGlyphRestore" TargetType="ContentControl">
+      <Setter Property="Width" Value="11"/><Setter Property="Height" Value="11"/><Setter Property="Focusable" Value="False"/>
+      <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="ContentControl"><Grid Width="11" Height="11">
+        <Path Data="M3.4,0.6 H10.4 V7.6" Stroke="{Binding Foreground,RelativeSource={RelativeSource TemplatedParent}}" StrokeThickness="1.2" StrokeLineJoin="Round" StrokeStartLineCap="Round" StrokeEndLineCap="Round"/>
+        <Rectangle Width="8" Height="8" Stroke="{Binding Foreground,RelativeSource={RelativeSource TemplatedParent}}" StrokeThickness="1.2" HorizontalAlignment="Left" VerticalAlignment="Bottom"/>
+      </Grid></ControlTemplate></Setter.Value></Setter>
+    </Style>
     <Style x:Key="WinGlyphClose" TargetType="ContentControl">
       <Setter Property="Width" Value="11"/><Setter Property="Height" Value="11"/><Setter Property="Focusable" Value="False"/>
       <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="ContentControl"><Grid Width="11" Height="11">
@@ -367,18 +383,20 @@
       <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Button">
         <Border x:Name="Chrome" Background="{TemplateBinding Background}"><ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
         <ControlTemplate.Triggers>
+          <!-- 标题栏按钮不因键盘焦点整块变色：FocusVisualStyle 已置空，
+               残留焦点会被用户看成「按钮一直处于选中/悬停状态」。焦点由代码在点击后主动清除。 -->
           <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Chrome" Property="Background" Value="{DynamicResource WinHover}"/></Trigger>
-          <Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="Chrome" Property="Background" Value="{DynamicResource WinHover}"/></Trigger>
           <Trigger Property="IsPressed" Value="True"><Setter Property="Opacity" Value=".7"/></Trigger>
         </ControlTemplate.Triggers>
       </ControlTemplate></Setter.Value></Setter>
     </Style>
     <Style x:Key="WinCaptionCloseButton" TargetType="Button" BasedOn="{StaticResource WinCaptionButton}">
       <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Button">
-        <Border x:Name="Chrome" Background="{TemplateBinding Background}"><ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
+        <Border x:Name="Chrome" Background="{TemplateBinding Background}" CornerRadius="{DynamicResource WinCaptionCornerRadius}"><ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
         <ControlTemplate.Triggers>
-          <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Chrome" Property="Background" Value="{DynamicResource WinClose}"/><Setter Property="Foreground" Value="White"/></Trigger>
-          <Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="Chrome" Property="Background" Value="{DynamicResource WinHover}"/></Trigger>
+          <!-- 关闭按钮不再使用系统红：与最小化 / 最大化保持同一块中性 WinHover 底色，
+               白色 × 改回继承的 WinText，避免右上角长期显示为一块突兀的红色「选中态」。 -->
+          <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Chrome" Property="Background" Value="{DynamicResource WinHover}"/></Trigger>
           <Trigger Property="IsPressed" Value="True"><Setter Property="Opacity" Value=".75"/></Trigger>
         </ControlTemplate.Triggers>
       </ControlTemplate></Setter.Value></Setter>

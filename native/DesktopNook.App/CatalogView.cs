@@ -13,6 +13,7 @@ using System.Windows.Threading;
 namespace DesktopNook.App;
 
 // 「全部图标」页面：浏览开始菜单 / 系统应用 / 桌面快捷方式，勾选后复制进番茄桌面。
+// 已收纳的应用不再出现在候选里；移回桌面或撤销后会自动重新出现。
 // 源文件（开始菜单、系统应用）永远不会被移动或删除。
 // 打开时立即显示页面；系统应用枚举放在后台 STA 线程，图标只对滚动到视口内的卡片解码。
 public partial class MainWindow
@@ -23,7 +24,11 @@ public partial class MainWindow
     private bool _catalogLoaded;
     private bool _catalogLoading;
     private bool _catalogVisible;
+    private string _catalogCollectedKey="";
     private DispatcherTimer? _catalogIconTimer;
+    // 已收纳集合的指纹：只有 OriginalPath 集合变化时才重建候选卡片，
+    // 保证「移回桌面 / 撤销」后再次打开页面时对应应用能重新出现。
+    private string CurrentCollectedKey()=>string.Join("\u0001",Store.State.Items.Select(i=>i.OriginalPath).OrderBy(p=>p,StringComparer.OrdinalIgnoreCase));
     private sealed class CatalogCard
     {
         public required CatalogEntry Entry {get;init;}
@@ -31,7 +36,6 @@ public partial class MainWindow
         public required Border Badge {get;init;}
         public required TextBlock BadgeText {get;init;}
         public required ShellIcon Icon {get;init;}
-        public required bool Collected {get;init;}
     }
 
     private void OnCatalogToggle(object sender,RoutedEventArgs e)
@@ -58,6 +62,7 @@ public partial class MainWindow
         CatalogCategory.ItemsSource=Store.State.Categories;
         CatalogCategory.SelectedValue=_activeCategory??"uncategorized";
         UpdateTabSelection();
+        if(_catalogCollectedKey!=CurrentCollectedKey())_catalogLoaded=false;
         if(!_catalogLoaded)
         {
             // 先呈现页面骨架，COM 枚举不占用 UI 线程；第二次打开直接用缓存，瞬间完成。
@@ -84,6 +89,8 @@ public partial class MainWindow
             {
                 _catalogLoading=false;
                 _catalogEntries=entries;
+                // 面板收起时只留纯数据（几 KB），不重建上百个卡片控件。
+                if(_resourcesSuspended)return;
                 if(!_catalogVisible||_catalogLoaded)return;
                 BuildCatalog();_catalogLoaded=true;
                 Summary.Text="全部图标 · "+_catalogCards.Count+" 个可添加";
@@ -94,13 +101,30 @@ public partial class MainWindow
         worker.SetApartmentState(ApartmentState.STA);
         worker.Start();
     }
+    // 面板收起时只卸载视觉树；_catalogEntries 是纯文本条目，保留它可在恢复时瞬间重建。
+    internal void ReleaseCatalogVisuals()
+    {
+        _catalogIconTimer?.Stop();
+        _catalogCards.Clear();CatalogGroups.Children.Clear();
+        _catalogLoaded=false;
+    }
+    internal void RestoreCatalogVisuals()
+    {
+        if(_resourcesSuspended||!_catalogVisible||_catalogLoaded)return;
+        if(_catalogEntries is null){StartCatalogLoad();return;}
+        BuildCatalog();_catalogLoaded=true;
+        ApplyCatalogFilter();
+    }
     private void BuildCatalog()
     {
-        _catalogCards.Clear();_catalogSelection.Clear();CatalogGroups.Children.Clear();
+        // 保留已勾选条目：面板收起再恢复时选择不会丢，重建后按记录重新上色。
+        _catalogCards.Clear();CatalogGroups.Children.Clear();
         // 开关已从底栏迁到「设置 → 行为」，偏好随 AppSettings 一起持久化与导入导出。
         bool showSystem=Settings.ShowSystemItems;
-        var entries=(_catalogEntries??[]).Where(e=>showSystem||!e.Hidden).ToList();
+        // 已收纳的应用不再进入候选列表：不显示灰卡与 ✓，也避免重复收纳。
         var collected=new HashSet<string>(Store.State.Items.Select(i=>i.OriginalPath),StringComparer.OrdinalIgnoreCase);
+        var entries=(_catalogEntries??[]).Where(e=>(showSystem||!e.Hidden)&&!collected.Contains(e.Source)).ToList();
+        _catalogSelection.RemoveWhere(e=>collected.Contains(e.Source));
         var groupIndex=0;
         foreach(var group in entries.GroupBy(e=>e.Group))
         {
@@ -120,9 +144,9 @@ public partial class MainWindow
             header.Children.Add(title);header.Children.Add(line);header.Children.Add(pill);
             foreach(var entry in items)
             {
-                bool isCollected=collected.Contains(entry.Source);
-                var (card,badge,badgeText,icon)=BuildCard(entry,isCollected);
-                var record=new CatalogCard{Entry=entry,Card=card,Badge=badge,BadgeText=badgeText,Icon=icon,Collected=isCollected};
+                var (card,badge,badgeText,icon)=BuildCard(entry);
+                var record=new CatalogCard{Entry=entry,Card=card,Badge=badge,BadgeText=badgeText,Icon=icon};
+                if(_catalogSelection.Contains(entry))PaintCard(record,true);
                 card.Tag=record;
                 card.MouseLeftButtonUp+=(_,_)=>ToggleCard(record);
                 card.MouseEnter+=(_,_)=>HoverCard(record,true);
@@ -132,32 +156,32 @@ public partial class MainWindow
             CatalogGroups.Children.Add(header);CatalogGroups.Children.Add(panel);
             groupIndex++;
         }
+        _catalogCollectedKey=CurrentCollectedKey();
         UpdateCatalogCount();
     }
-    private (Border,Border,TextBlock,ShellIcon) BuildCard(CatalogEntry entry,bool collected)
+    private (Border,Border,TextBlock,ShellIcon) BuildCard(CatalogEntry entry)
     {
         var icon=new ShellIcon{IconPath=entry.IconPath,Fast=true,FixedPixels=48,Deferred=true,Width=36,Height=36,Margin=new Thickness(0,4,0,8)};
-        var name=new TextBlock{Text=entry.Name,FontSize=11,Foreground=Res(collected?"WinTextSecondary":"WinText"),TextAlignment=TextAlignment.Center,TextWrapping=TextWrapping.Wrap,TextTrimming=TextTrimming.CharacterEllipsis,MaxHeight=32,MaxWidth=84};
+        var name=new TextBlock{Text=entry.Name,FontSize=11,Foreground=Res("WinText"),TextAlignment=TextAlignment.Center,TextWrapping=TextWrapping.Wrap,TextTrimming=TextTrimming.CharacterEllipsis,MaxHeight=32,MaxWidth=84};
         var stack=new StackPanel{HorizontalAlignment=HorizontalAlignment.Center,VerticalAlignment=VerticalAlignment.Top,Margin=new Thickness(4,6,4,0)};
         stack.Children.Add(icon);stack.Children.Add(name);
         // 状态标记固定在右上角：「+」只作淡提示，选中后变实心对勾。
-        var badgeText=new TextBlock{Text=collected?"✓":"+",FontSize=11,FontWeight=FontWeights.SemiBold,Foreground=Res("WinTextSecondary"),HorizontalAlignment=HorizontalAlignment.Center,VerticalAlignment=VerticalAlignment.Center};
-        var badge=new Border{Width=18,Height=18,CornerRadius=new CornerRadius(9),Background=Brushes.Transparent,HorizontalAlignment=HorizontalAlignment.Right,VerticalAlignment=VerticalAlignment.Top,Margin=new Thickness(0,4,4,0),Visibility=collected?Visibility.Visible:Visibility.Collapsed,Child=badgeText};
+        var badgeText=new TextBlock{Text="+",FontSize=11,FontWeight=FontWeights.SemiBold,Foreground=Res("WinTextSecondary"),HorizontalAlignment=HorizontalAlignment.Center,VerticalAlignment=VerticalAlignment.Center};
+        var badge=new Border{Width=18,Height=18,CornerRadius=new CornerRadius(9),Background=Brushes.Transparent,HorizontalAlignment=HorizontalAlignment.Right,VerticalAlignment=VerticalAlignment.Top,Margin=new Thickness(0,4,4,0),Visibility=Visibility.Collapsed,Child=badgeText};
         // 与主界面一致：磁贴默认透明，悬停 / 选中才浮出底色，避免与外层白卡叠色。
-        var card=new Border{Width=88,Height=92,Background=Brushes.Transparent,BorderBrush=Brushes.Transparent,BorderThickness=new Thickness(1),CornerRadius=new CornerRadius(8),Margin=new Thickness(4),Cursor=collected?Cursors.Arrow:Cursors.Hand,ToolTip=entry.Name+" · "+entry.Group+(collected?"（已收纳）":"")};
+        var card=new Border{Width=88,Height=92,Background=Brushes.Transparent,BorderBrush=Brushes.Transparent,BorderThickness=new Thickness(1),CornerRadius=new CornerRadius(8),Margin=new Thickness(4),Cursor=Cursors.Hand,ToolTip=entry.Name+" · "+entry.Group};
         var grid=new Grid();grid.Children.Add(stack);grid.Children.Add(badge);card.Child=grid;
         return (card,badge,badgeText,icon);
     }
     private void ToggleCard(CatalogCard record)
     {
-        if(record.Collected)return;
         if(_catalogSelection.Add(record.Entry))PaintCard(record,true);
         else {_catalogSelection.Remove(record.Entry);PaintCard(record,false);}
         UpdateCatalogCount();
     }
     private void HoverCard(CatalogCard r,bool hover)
     {
-        if(r.Collected||_catalogSelection.Contains(r.Entry))return;
+        if(_catalogSelection.Contains(r.Entry))return;
         r.Card.Background=hover?Brush("#14000000"):Brushes.Transparent;
         r.Badge.Visibility=hover?Visibility.Visible:Visibility.Collapsed;
     }
@@ -197,7 +221,7 @@ public partial class MainWindow
         BuildCatalog();
         foreach(var entry in selected)
         {
-            var card=_catalogCards.FirstOrDefault(c=>c.Entry==entry&&!c.Collected);
+            var card=_catalogCards.FirstOrDefault(c=>c.Entry==entry);
             if(card is not null){_catalogSelection.Add(card.Entry);PaintCard(card,true);}
         }
         UpdateCatalogCount();

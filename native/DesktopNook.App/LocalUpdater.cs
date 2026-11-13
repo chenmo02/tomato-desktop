@@ -35,7 +35,7 @@ internal static class LocalUpdater
         if(source.Equals(target,StringComparison.OrdinalIgnoreCase))throw new IOException("请选择其他位置的新版本文件。");
         var candidate=Inspect(source);var current=Inspect(target);
         if(candidate.Version<current.Version)throw new IOException("所选版本较旧，请选择当前版本或更新版本。");
-        if(candidate.Installer && (!Path.GetFileName(target).Equals("DesktopNook.exe",StringComparison.OrdinalIgnoreCase)||!File.Exists(Path.Combine(Path.GetDirectoryName(target)!,"卸载番茄桌面.exe"))))throw new IOException("当前是免安装版，请选择新版番茄桌面 EXE；安装版可选择安装包覆盖升级。");
+        if(candidate.Installer && (!Path.GetFileName(target).Equals("DesktopNook.exe",StringComparison.OrdinalIgnoreCase)||!File.Exists(Path.Combine(Path.GetDirectoryName(target)!,"卸载番茄桌面.exe"))))throw new IOException("未检测到已安装的番茄桌面，请先运行安装包完成安装，再使用更新包升级。");
         var dir=Path.Combine(dataRoot,"updates",Guid.NewGuid().ToString("N"));Directory.CreateDirectory(dir);
         var staged=Path.Combine(dir,candidate.Installer?"package.exe":"candidate.exe");var helper=Path.Combine(dir,"DesktopNook.Updater.exe");
         DesktopNook.Core.NookStore.CopyPreservingStreams(source,staged);DesktopNook.Core.NookStore.CopyPreservingStreams(Environment.ProcessPath!,helper);
@@ -59,10 +59,17 @@ internal static class LocalUpdater
             var candidate=Inspect(plan.Candidate);var current=Inspect(plan.Target);
             if(candidate.Version<current.Version||candidate.Installer!=plan.Installer||Hash(plan.Target)!=plan.PreviousHash)throw new IOException("当前程序或更新文件已发生变化，请重新选择更新。");
             if(plan.ProcessId>0){try{using var process=Process.GetProcessById(plan.ProcessId);if(!string.Equals(process.MainModule?.FileName,plan.Target,StringComparison.OrdinalIgnoreCase))throw new IOException("待退出程序身份不一致。");if(!process.WaitForExit(30000))throw new IOException("旧程序仍在运行，尚未更新。");}catch(ArgumentException){}}
+            var launchTarget=plan.Target;
             if(plan.Installer)
             {
                 var info=new ProcessStartInfo(plan.Candidate){UseShellExecute=false,CreateNoWindow=true};info.ArgumentList.Add("/S");info.ArgumentList.Add("/D="+Path.GetDirectoryName(plan.Target));using var installer=Process.Start(info)??throw new IOException("未能启动更新包。");installer.WaitForExit();if(installer.ExitCode!=0)throw new IOException("更新包未完成，退出码 "+installer.ExitCode);
-                if(Inspect(plan.Target).Version<candidate.Version)throw new IOException("安装包未更新到目标版本。");
+                // 1.2 及更早版本装在 Programs\DesktopNook；新版安装器统一到数据目录并移除旧 EXE。
+                if(!File.Exists(launchTarget)&&plan.Sandbox is null)
+                {
+                    var unified=Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"DesktopNook","DesktopNook.exe");
+                    if(File.Exists(unified))launchTarget=unified;
+                }
+                if(Inspect(launchTarget).Version<candidate.Version)throw new IOException("安装包未更新到目标版本。");
             }
             else
             {
@@ -74,7 +81,7 @@ internal static class LocalUpdater
                 var key=Microsoft.Win32.Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Uninstall\DesktopNook",true);
                 using(key){if(string.Equals(key?.GetValue("InstallLocation") as string,Path.GetDirectoryName(plan.Target),StringComparison.OrdinalIgnoreCase))key!.SetValue("DisplayVersion",plan.Version);}
             }
-            var start=new ProcessStartInfo(plan.Target){UseShellExecute=false,WorkingDirectory=Path.GetDirectoryName(plan.Target)!};
+            var start=new ProcessStartInfo(launchTarget){UseShellExecute=false,WorkingDirectory=Path.GetDirectoryName(launchTarget)!};
             if(plan.Sandbox is not null){start.ArgumentList.Add("--sandbox");start.ArgumentList.Add(plan.Sandbox);}
             start.ArgumentList.Add("--update-ready");var ready=Path.Combine(directory,"ready.json");start.ArgumentList.Add(ready);
             using var updated=Process.Start(start)??throw new IOException("新版程序未能启动，备份已保留。");

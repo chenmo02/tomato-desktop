@@ -61,10 +61,90 @@ internal static class SharpIcons
                 if(GetDIBits(dc,bitmap,0,(uint)height,pixels,ref info,0)==0)return null;
                 var alpha=false;for(var i=3;i<pixels.Length;i+=4)if(pixels[i]!=0){alpha=true;break;}
                 if(!alpha)for(var i=3;i<pixels.Length;i+=4)pixels[i]=255;
+                NormalizeIconAlpha(pixels);
+                // exe 只带小尺寸图标帧时，Shell 不会放大图标，而是返回「请求尺寸 +
+                // 一圈半透明描边 + 居中原始图标」的画布。2× 超采样把 44px 显示请求提到
+                // 88px 后，WPF 缩回去就成了「灰框里一个小图标」；开始菜单取的是原生
+                // 48px 帧，所以没有这个问题。裁掉描边与留白，把图标按原比例放大回
+                // 请求尺寸，位图尺寸保持不变，缓存键和像素尺寸断言都不受影响。
+                var box=SolidBounds(pixels,width,height);
+                if(box.Width>0&&box.Height>0&&(box.Width<width*0.9||box.Height<height*0.9))pixels=RemoveIconFrame(pixels,width,height,box);
                 var image=BitmapSource.Create(width,height,96,96,PixelFormats.Pbgra32,null,pixels,width*4);image.Freeze();return image;
             }finally{ReleaseDC(IntPtr.Zero,dc);}
         }
         catch{return null;}
         finally{if(bitmap!=IntPtr.Zero)DeleteObject(bitmap);if(factory is not null)Marshal.ReleaseComObject(factory);}
+    }
+
+    // alpha>=128 的实心范围。Shell 给小图标加的描边是 alpha 5~38 的半透明黑，会被排除。
+    private static Int32Rect SolidBounds(byte[] pixels,int width,int height)
+    {
+        int left=width,top=height,right=-1,bottom=-1;
+        for(int y=0;y<height;y++)
+            for(int x=0;x<width;x++)
+            {
+                if(pixels[(y*width+x)*4+3]<128)continue;
+                if(x<left)left=x;if(x>right)right=x;
+                if(y<top)top=y;if(y>bottom)bottom=y;
+            }
+        return right<left?default:new Int32Rect(left,top,right-left+1,bottom-top+1);
+    }
+    // 把实心范围按原比例双线性放大到整张画布（居中），其余像素留全透明；
+    // 数据在预乘 alpha 空间，插值不会产生黑边。
+    private static byte[] RemoveIconFrame(byte[] pixels,int width,int height,Int32Rect box)
+    {
+        var scaled=new byte[width*height*4];
+        double ratio=Math.Min((double)width/box.Width,(double)height/box.Height);
+        int drawW=Math.Max(1,(int)Math.Round(box.Width*ratio)),drawH=Math.Max(1,(int)Math.Round(box.Height*ratio));
+        int left=(width-drawW)/2,top=(height-drawH)/2;
+        int maxX=box.X+box.Width-1,maxY=box.Y+box.Height-1;
+        for(int y=0;y<drawH;y++)
+        {
+            double sy=box.Y+(y+0.5)*box.Height/drawH-0.5;
+            int y0=Math.Clamp((int)Math.Floor(sy),box.Y,maxY),y1=Math.Min(y0+1,maxY);double fy=sy-y0;
+            for(int x=0;x<drawW;x++)
+            {
+                double sx=box.X+(x+0.5)*box.Width/drawW-0.5;
+                int x0=Math.Clamp((int)Math.Floor(sx),box.X,maxX),x1=Math.Min(x0+1,maxX);double fx=sx-x0;
+                int dst=((top+y)*width+left+x)*4;
+                int a00=(y0*width+x0)*4,a10=(y0*width+x1)*4,a01=(y1*width+x0)*4,a11=(y1*width+x1)*4;
+                for(int c=0;c<4;c++)
+                {
+                    double v0=pixels[a00+c]+(pixels[a10+c]-pixels[a00+c])*fx;
+                    double v1=pixels[a01+c]+(pixels[a11+c]-pixels[a01+c])*fx;
+                    scaled[dst+c]=(byte)Math.Clamp((int)Math.Round(v0+(v1-v0)*fy),0,255);
+                }
+            }
+        }
+        return scaled;
+    }
+
+    // 只修正图标透明边缘的颜色数据，消除圆形图标外沿的白环，不改动任何可见图形。
+    // Shell 返回的 32bpp DIB 未必预乘 alpha，透明像素的 RGB 常被留成白色；BitmapSource
+    // 按 Pbgra32 解释时，这些白色会随 2× 超采样后的高质量缩小渗进半透明抗锯齿边缘。
+    // 判据：预乘格式下任一通道都 <= a，若存在 0<a<255 且 RGB>a 即说明数据未预乘。
+    internal static void NormalizeIconAlpha(byte[] pixels)
+    {
+        bool unpremultiplied=false;
+        for(int o=0;o<pixels.Length;o+=4)
+        {
+            int a=pixels[o+3];
+            if(a>0&&a<255&&(pixels[o]>a||pixels[o+1]>a||pixels[o+2]>a)){unpremultiplied=true;break;}
+        }
+        for(int o=0;o<pixels.Length;o+=4)
+        {
+            int a=pixels[o+3];
+            if(a==0){pixels[o]=pixels[o+1]=pixels[o+2]=0;continue;}
+            // 几乎透明、颜色又是白的 fringe 像素直接丢弃，它们只会贡献一圈白光晕。
+            if(a<64)
+            {
+                int r=pixels[o+2]*255/a,g=pixels[o+1]*255/a,b=pixels[o]*255/a;
+                if(r>=200&&g>=200&&b>=200){pixels[o]=pixels[o+1]=pixels[o+2]=pixels[o+3]=0;continue;}
+            }
+            if(!unpremultiplied||a==255)continue;
+            pixels[o]=(byte)(pixels[o]*a/255);
+            pixels[o+1]=(byte)(pixels[o+1]*a/255);
+            pixels[o+2]=(byte)(pixels[o+2]*a/255);
+        }
     }
 }

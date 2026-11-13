@@ -16,13 +16,11 @@ if($exeInfo.ProductName -ne '番茄桌面' -or $setupInfo.ProductName -ne '番�
 $tag='v'+$version
 $stage=Join-Path $PSScriptRoot ('..\artifacts\github-release\'+$tag)
 New-Item -ItemType Directory -Path $stage -Force | Out-Null
-$binary=Join-Path $stage 'DesktopNook-win-x64.exe'
 $setup=Join-Path $stage 'DesktopNook-Setup.exe'
-Copy-Item -LiteralPath $Executable -Destination $binary -Force
 Copy-Item -LiteralPath $Installer -Destination $setup -Force
-$hashes=@($binary,$setup)|ForEach-Object{(Get-FileHash -LiteralPath $_ -Algorithm SHA256).Hash.ToLowerInvariant()+'  '+[IO.Path]::GetFileName($_)}
+$hashes=@($setup)|ForEach-Object{(Get-FileHash -LiteralPath $_ -Algorithm SHA256).Hash.ToLowerInvariant()+'  '+[IO.Path]::GetFileName($_)}
 $checksum=Join-Path $stage 'SHA256SUMS.txt'
-[IO.File]::WriteAllLines($checksum,$hashes,[Text.UTF8Encoding]::new($false))
+[IO.File]::WriteAllLines($checksum,[string[]]@($hashes),[Text.UTF8Encoding]::new($false))
 $readme=@'
 # 番茄桌面 · Windows 发布
 
@@ -33,14 +31,13 @@ $readme=@'
 打开本仓库的 Releases，下载最新正式版：
 
 - `DesktopNook-Setup.exe`：安装版，适合首次安装或覆盖升级。
-- `DesktopNook-win-x64.exe`：免安装版，下载后直接运行。
 - `SHA256SUMS.txt`：发布文件的 SHA-256 校验值。
 
-支持 Windows x64，程序内含运行时。在线更新源当前停用，启动后不会后台检查新版本；请手动下载新版后使用“更多 → 从本地文件更新…”，校验通过后自动更新并重启。首次从旧版本升级，请覆盖安装一次。
+支持 Windows x64，程序内含运行时，安装到 %LOCALAPPDATA%\DesktopNook，与收纳数据共用同一目录，无需管理员权限。在线更新源当前停用，启动后不会后台检查新版本；请手动下载安装包覆盖安装，或使用“更多 → 从本地文件更新…”选择安装包，校验通过后自动更新并重启。首次从旧版本升级，请覆盖安装一次。
 
 分类、收纳内容及设置保留在本机；本仓库仅用于发布程序与更新说明，不包含用户数据。下载速度受网络与系统代理设置影响。
 
-下载失败时可重试，也可手动下载后使用“更多 → 从本地文件更新”。
+下载失败时可重试，也可手动下载安装包后使用“更多 → 从本地文件更新”。
 '@
 $priorProxy=$env:HTTPS_PROXY
 try {
@@ -64,12 +61,12 @@ try {
     $existing=$releases|Where-Object tag_name -eq $tag
     if($VerifyOnly -and -not $existing){throw '待核验的发行版不存在。'}
     if($existing -and -not $existing.draft -and -not $VerifyOnly){throw '该版本已公开，请使用新版本号，不覆盖已发布文件。'}
-    # Publish only the three explicit files, after all uploads and hashes succeed.
+    # Publish only the two explicit files, after all uploads and hashes succeed.
     if(-not $existing) {
-        & gh release create $tag $binary $setup $checksum --repo $Repository --draft --title ('番茄桌面 '+$version) --notes-file $NotesFile
+        & gh release create $tag $setup $checksum --repo $Repository --draft --title ('番茄桌面 '+$version) --notes-file $NotesFile
         if($LASTEXITCODE -ne 0){throw '发行包上传未完成，草稿保留，可再次运行本脚本续传。'}
     } elseif($existing.draft -and -not $VerifyOnly) {
-        foreach($file in @($binary,$setup,$checksum)) {
+        foreach($file in @($setup,$checksum)) {
             if(-not ($existing.assets|Where-Object name -eq ([IO.Path]::GetFileName($file)))) {
                 & gh release upload $tag $file --repo $Repository
                 if($LASTEXITCODE -ne 0){throw '发行包续传失败，草稿保留。'}
@@ -78,7 +75,7 @@ try {
     }
     $release=@(& gh api "repos/$Repository/releases" | ConvertFrom-Json)|Where-Object tag_name -eq $tag
     if($LASTEXITCODE -ne 0){throw '无法核对上传文件。'}
-    foreach($file in @($binary,$setup,$checksum)) {
+    foreach($file in @($setup,$checksum)) {
         $asset=$release.assets|Where-Object name -eq ([IO.Path]::GetFileName($file))
         $expected='sha256:'+(Get-FileHash -LiteralPath $file).Hash.ToLowerInvariant()
         if($asset.digest -ne $expected){throw '上传后 SHA-256 不一致，发行版保留为草稿。'}

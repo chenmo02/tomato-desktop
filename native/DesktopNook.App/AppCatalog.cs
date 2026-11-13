@@ -283,8 +283,33 @@ internal static class CatalogVerification
             foreach(var card in cards)
                 if(((Border)card.GetType().GetProperty("Card",BindingFlags.Instance|BindingFlags.Public)!.GetValue(card)!).Visibility==Visibility.Visible)visible++;
             lines.Add($"toggle-default cards={cards.Count} search-visible={visible}");
-            window.CatalogSearch.Text="";filter.Invoke(window,null);
-            ok=cards.Count>0&&openMs<500&&requested<cards.Count&&visible>0;
+        window.CatalogSearch.Text="";filter.Invoke(window,null);
+        // 已收纳的应用必须从候选里消失；移回桌面 / 撤销后又必须重新出现。
+        int hidden=0,restored=0;
+        if(cards.Count>0)
+        {
+            string SourceOf(object card)
+            {
+                var entry=card.GetType().GetProperty("Entry",BindingFlags.Instance|BindingFlags.Public)!.GetValue(card)!;
+                return (string)entry.GetType().GetProperty("Source")!.GetValue(entry)!;
+            }
+            bool ContainsSource(string source)
+            {
+                foreach(var card in cards)
+                    if(card is not null&&string.Equals(SourceOf(card),source,StringComparison.OrdinalIgnoreCase))return true;
+                return false;
+            }
+            var source=SourceOf(cards[0]!);
+            var probe=new NookItem{Name="__catalog_probe__",OriginalPath=source};
+            App.Store.State.Items.Add(probe);
+            show.Invoke(window,null);
+            hidden=ContainsSource(source)?0:1;
+            App.Store.State.Items.Remove(probe);
+            show.Invoke(window,null);
+            restored=ContainsSource(source)?1:0;
+        }
+        lines.Add($"collected-hidden={hidden} restored-after-removal={restored}");
+        ok=cards.Count>0&&openMs<500&&requested<cards.Count&&visible>0&&hidden==1&&restored==1;
         }
         catch(Exception ex){lines.Add("error="+ex);}
         File.WriteAllLines(reportPath,lines);

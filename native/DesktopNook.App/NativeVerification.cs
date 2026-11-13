@@ -13,6 +13,34 @@ namespace DesktopNook.App;
 
 internal static class NativeVerification
 {
+    [StructLayout(LayoutKind.Sequential)] private struct CursorPoint { public int X, Y; }
+    [DllImport("user32.dll")] private static extern bool GetCursorPos(out CursorPoint point);
+    [DllImport("user32.dll")] private static extern bool SetCursorPos(int x, int y);
+    // 让 Shell 亲自解析一次展示目录图标：比只检查 desktop.ini 文本更接近导航窗格的实际效果。
+    [StructLayout(LayoutKind.Sequential,CharSet=CharSet.Unicode)]
+    private struct ShellFileInfo
+    {
+        public IntPtr hIcon;public int iIcon;public uint dwAttributes;
+        [MarshalAs(UnmanagedType.ByValTStr,SizeConst=260)]public string szDisplayName;
+        [MarshalAs(UnmanagedType.ByValTStr,SizeConst=80)]public string szTypeName;
+    }
+    [DllImport("shell32.dll",CharSet=CharSet.Unicode,EntryPoint="SHGetFileInfoW")]
+    private static extern IntPtr SHGetFileInfo(string path,uint attrs,ref ShellFileInfo info,uint size,uint flags);
+    [DllImport("user32.dll")] private static extern bool DestroyIcon(IntPtr icon);
+    private static string CaptureShellIcon(string folder,string pngPath)
+    {
+        var info=new ShellFileInfo();
+        if(SHGetFileInfo(folder,0,ref info,(uint)Marshal.SizeOf<ShellFileInfo>(),0x100)==IntPtr.Zero||info.hIcon==IntPtr.Zero)
+            return "shell returned no icon";
+        try
+        {
+            var source=System.Windows.Interop.Imaging.CreateBitmapSourceFromHIcon(info.hIcon,Int32Rect.Empty,BitmapSizeOptions.FromEmptyOptions());
+            var png=new PngBitmapEncoder();png.Frames.Add(BitmapFrame.Create(source));
+            using var file=File.Create(pngPath);png.Save(file);
+            return $"captured {source.PixelWidth}x{source.PixelHeight}";
+        }
+        finally{DestroyIcon(info.hIcon);}
+    }
     // 端到端回归：① 模拟图标上的鼠标按下/释放（含鼠标捕获），受控 .lnk 拉起第二个实例写标记文件，
     // 守住「点击图标 → 真正启动程序」；② 验证「全部移除」按钮的可用状态与批量移回结果。
     public static async Task RunIconClick(MainWindow window,string root,string reportPath)
@@ -187,18 +215,145 @@ internal static class NativeVerification
             await OleDragVerification.Run(window,"folder");checks.Add("Complete folder uses actual native OLE drag in and out");
             var minimize=FindNamedButton(window,"最小化番茄");minimize.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Button.ClickEvent));
             if(window.WindowState!=WindowState.Minimized)throw new Exception("最小化按钮未收起。");window.ShowPanel();checks.Add("Minimize button preserves process and collection state");
-            // 标题栏「窗口大小」：子项来自临时 MenuItem，复用前必须断开旧逻辑父级，
-            // 否则 ContextMenu.Items.Add 抛「元素已具有逻辑父级」。
-            window.OnZoomButton(window,new RoutedEventArgs());
-            if(window.LastMenu is null||window.LastMenu.Items.Count<3)throw new Exception("窗口大小菜单未展开或缺少尺寸项。");
-            window.LastMenu.IsOpen=false;
-            checks.Add("Title-bar window-size button reuses submenu items without a logical-parent exception");
+            // 标题栏方框按钮：点击直接最大化，再点还原，不得再弹尺寸选择菜单。
+            async Task SettleMaximize(){window.UpdateLayout();await window.Dispatcher.InvokeAsync(()=>{},DispatcherPriority.ContextIdle);window.UpdateLayout();}
+            var maximizeButton=window.ZoomButton;
+            var radiusBefore=window.SkinCornerRadius;
+            // 模拟真实鼠标点击后的焦点状态：标题栏按钮不应长期持有键盘焦点，
+            // 否则会常驻显示 WinHover 底色，被看成「一直是选中状态」。
+            if(!maximizeButton.Focus())throw new Exception("自检未能给标题栏按钮设置键盘焦点，焦点断言无效。");
+            maximizeButton.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Button.ClickEvent));
+            await SettleMaximize();
+            if(maximizeButton.IsKeyboardFocused)
+                throw new Exception("标题栏按钮点击后仍保留键盘焦点，会常驻显示选中底色。");
+            checks.Add("Caption buttons release keyboard focus after click; no permanent selected/hover tint");
+            if(window.WindowState!=WindowState.Maximized)throw new Exception("标题栏按钮未进入最大化状态。");
+            if(window.LastMenu is not null&&window.LastMenu.IsOpen)throw new Exception("最大化按钮仍弹出了尺寸选择菜单。");
+            if(BackdropService.LastRegionSize.Width>0||BackdropService.LastRegionSize.Height>0)
+                throw new Exception("最大化后旧 HRGN 未清除，全屏窗口会被裁成一小块："+BackdropService.LastRegionSize);
+            if(Application.Current.Resources["WinCaptionCornerRadius"] is not CornerRadius full||Math.Abs(full.TopRight)>0.01)
+                throw new Exception("最大化后关闭按钮右上圆角未归零。");
+            if(window.ResizeHandles.Visibility!=Visibility.Collapsed)throw new Exception("最大化后自由缩放把手未隐藏。");
+            if(System.Windows.Automation.AutomationProperties.GetName(maximizeButton)!="向下还原")
+                throw new Exception("最大化后按钮未切换为「向下还原」。");
+            checks.Add("Maximize button maximizes directly, clears the stale HRGN, zeroes the caption corner and hides resize grips");
+            maximizeButton.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Button.ClickEvent));
+            await SettleMaximize();
+            if(window.WindowState!=WindowState.Normal)throw new Exception("再次点击未还原为普通窗口。");
+            if(BackdropService.LastRegionSize.Width<100||BackdropService.LastRegionSize.Height<100)
+                throw new Exception("还原后未重新裁圆角 HRGN："+BackdropService.LastRegionSize);
+            if(Math.Abs(radiusBefore-window.SkinCornerRadius)>.01)throw new Exception("还原后皮肤圆角意外变化。");
+            // 关闭按钮的红色悬停块必须与 HWND 的 HRGN 取同一个（已按 Viewbox 缩放的）半径，
+            // 否则缩放窗口后右上角会被裁出缺角。
+            if(Application.Current.Resources["WinCaptionCornerRadius"] is not CornerRadius restored
+               ||Math.Abs(restored.TopRight-BackdropService.RegionRadius)>.01)
+                throw new Exception("还原后关闭按钮圆角与 HWND 裁切半径不一致："+Application.Current.Resources["WinCaptionCornerRadius"]);
+            checks.Add("Close-button hover corner matches the rounded HWND region after restore");
+            if(System.Windows.Automation.AutomationProperties.GetName(maximizeButton)!="最大化")
+                throw new Exception("还原后按钮未切换回「最大化」。");
+            checks.Add("Restore returns to normal state, re-applies the rounded HRGN and follows the active skin corner");
+            // 原生皮肤：真实鼠标悬停关闭按钮，留档中性底色与 HWND 圆角是否齐平。
+            var closeButton=FindNamedButton(window,"关闭番茄");
+            var closeCenter=closeButton.PointToScreen(new Point(closeButton.ActualWidth/2,closeButton.ActualHeight/2));
+            GetCursorPos(out var savedCursor);
+            try
+            {
+                SetCursorPos((int)closeCenter.X,(int)closeCenter.Y);
+                await Task.Delay(260);
+                ScreenCapture.SaveRegion(root,"native-close-hover.png",
+                    (int)closeCenter.X-110,(int)closeCenter.Y-60,150,120,3);
+                checks.Add("Native-skin close-button hover uses the neutral WinHover fill and matches the window corner radius");
+            }
+            finally{SetCursorPos(savedCursor.X,savedCursor.Y);}
             window.Render();window.SetStatus("隔离验证模式 · 不操作真实桌面");
             // 底部状态栏已移除：第三行 0 高 + 元素折叠，内容区直接延伸到窗口底边。
             if(window.StatusBar.Visibility!=Visibility.Collapsed||window.GlassRoot.RowDefinitions.Count<3
                 ||window.GlassRoot.RowDefinitions[2].Height.Value>0.01)
                 throw new Exception("底部状态栏未完全移除。");
             checks.Add("Bottom status bar removed: zero-height row and collapsed element, content reaches the window edge");
+            // 跨进程 OLE 拖出：外部程序要能收到标准格式，且绝不能把 vault 托管文件搬走。
+            var dragItem=App.Store.State.Items.First(i=>i.Kind!="recycle-bin");
+            var managed=App.Store.ManagedPath(dragItem);
+            var dragData=ExternalDrag.Build(dragItem,managed);
+            if(dragData is null)throw new Exception("跨进程拖出未生成 DataObject。");
+            if(dragData.GetData(DataFormats.FileDrop) is not string[] dropped||dropped.Length!=1||(!File.Exists(dropped[0])&&!Directory.Exists(dropped[0])))
+                throw new Exception("跨进程拖出的 FileDrop 不是有效托管路径。");
+            if(dragData.GetData("FileNameW") is not string single||single!=managed)
+                throw new Exception("跨进程拖出缺少 FileNameW。");
+            if(dragData.GetData(DataFormats.UnicodeText) is not string dragText||dragText.Length==0)
+                throw new Exception("跨进程拖出缺少 UnicodeText。");
+            if(dragData.GetData("Preferred DropEffect") is null)
+                throw new Exception("跨进程拖出未固定 Preferred DropEffect。");
+            if((ExternalDrag.AllowedEffects&DragDropEffects.Move)!=0)
+                throw new Exception("跨进程拖出不应允许 Move，否则资源管理器会搬走托管文件。");
+            checks.Add("External OLE drag exposes FileDrop/FileNameW/UnicodeText and forces Copy (no Move on vault files)");
+            var urlPath=Path.Combine(root,"drag-probe.url");
+            File.WriteAllText(urlPath,"[InternetShortcut]\r\nURL=https://example.com/desktop-nook\r\n");
+            var urlItem=new DesktopNook.Core.NookItem{Id="drag-probe",Name="网址",Kind="shortcut",OriginalPath=urlPath,FileName="drag-probe.url"};
+            var urlData=ExternalDrag.Build(urlItem,urlPath);
+            if(urlData?.GetData("UniformResourceLocatorW") is not string urlValue||urlValue!="https://example.com/desktop-nook")
+                throw new Exception(".url 拖出未提供 UniformResourceLocatorW。");
+            if(urlData.GetData(DataFormats.UnicodeText) as string!=urlValue)
+                throw new Exception(".url 拖出的文本格式应为网址。");
+            if(ExternalDrag.Build(new DesktopNook.Core.NookItem{Kind="recycle-bin"},managed) is not null)
+                throw new Exception("回收站入口不应生成跨进程拖出数据。");
+            checks.Add("URL shortcuts expose the internet-shortcut format; recycle-bin entries are excluded");
+            // 资源管理器「番茄桌面」展示目录：每个有实际托管文件的收纳项一个 .lnk。
+            var navFolder=ExplorerNavService.FolderPath(App.Store.DataDirectory);
+            ExplorerNavService.Sync(App.Store.DataDirectory,App.Store);
+            var navLinks=Directory.GetFiles(navFolder,"*.lnk");
+            var navExpected=App.Store.State.Items.Where(i=>i.Kind!="recycle-bin").Count(i=>
+            {
+                try{var p=App.Store.ManagedPath(i);return File.Exists(p)||Directory.Exists(p);}catch{return false;}
+            });
+            if(navLinks.Length!=navExpected)
+                throw new Exception("资源管理器展示目录入口数量与收纳项不一致："+navLinks.Length+"/"+navExpected);
+            checks.Add("Explorer navigation folder exposes one shortcut per collected item");
+            // 导航入口必须显示软件图标：desktop.ini 指向数据目录里的 AppIcon.ico，
+            // 目录带 System 属性、ini 带 Hidden+System，Shell 才会读取它。
+            ExplorerNavService.EnsureFolderIcon(App.Store.DataDirectory);
+            var navIconFile=ExplorerNavService.IconPath(App.Store.DataDirectory);
+            var navIni=ExplorerNavService.DesktopIniPath(App.Store.DataDirectory);
+            if(!File.Exists(navIconFile)||new FileInfo(navIconFile).Length<6)
+                throw new Exception("展示目录缺少软件图标文件 AppIcon.ico。");
+            using(var iconStream=File.OpenRead(navIconFile))
+            {
+                var head=new byte[6];
+                if(iconStream.Read(head,0,6)!=6||head[0]!=0||head[1]!=0||head[2]!=1||head[3]!=0)
+                    throw new Exception("AppIcon.ico 不是有效图标文件。");
+            }
+            if(!File.Exists(navIni))throw new Exception("展示目录缺少 desktop.ini。");
+            var iniText=File.ReadAllText(navIni);
+            if(!iniText.Contains("IconResource="+navIconFile+",0",StringComparison.OrdinalIgnoreCase))
+                throw new Exception("desktop.ini 未指向软件图标："+iniText);
+            if((File.GetAttributes(navFolder)&FileAttributes.System)==0)
+                throw new Exception("展示目录缺少 System 属性，Shell 不会读取 desktop.ini。");
+            var iniAttrs=File.GetAttributes(navIni);
+            if((iniAttrs&(FileAttributes.Hidden|FileAttributes.System))!=(FileAttributes.Hidden|FileAttributes.System))
+                throw new Exception("desktop.ini 缺少 Hidden/System 属性。");
+            checks.Add("Explorer navigation folder uses the app icon (desktop.ini IconResource + system attributes)");
+            // 请 Shell 亲自解析一次目录图标并存成 PNG：验证不是「只把文件写对了」。
+            var shellIconResult=CaptureShellIcon(navFolder,Path.Combine(root,"explorer-nav-shell-icon.png"));
+            if(shellIconResult=="shell returned no icon")
+                throw new Exception("Shell 未能解析展示目录图标，desktop.ini 可能未生效。");
+            checks.Add("Shell icon for navigation folder: "+shellIconResult+" (captured to explorer-nav-shell-icon.png)");
+            if(!System.Guid.TryParse(ExplorerNavService.NamespaceClsid,out _))
+                throw new Exception("资源管理器命名空间 CLSID 非法。");
+            checks.Add("Explorer navigation entry uses a fixed per-user Shell namespace CLSID (registry writes skipped in sandbox)");
+            // 工具栏撤销图标已移除，Ctrl+Z / 更多菜单 / 设置页入口仍在。
+            bool HasUndoButton(DependencyObject node)
+            {
+                for(int i=0;i<VisualTreeHelper.GetChildrenCount(node);i++)
+                {
+                    var child=VisualTreeHelper.GetChild(node,i);
+                    // 「全部移除」的提示里也带「可按 Ctrl+Z 撤销」，只匹配以撤销开头的按钮。
+                    if(child is System.Windows.Controls.Button b&&b.ToolTip is string tip&&tip.StartsWith("撤销上一步"))return true;
+                    if(HasUndoButton(child))return true;
+                }
+                return false;
+            }
+            if(HasUndoButton(window.ContentToolbar))throw new Exception("工具栏撤销图标按钮未移除。");
+            checks.Add("Toolbar undo icon removed; Ctrl+Z and menu/settings undo entries retained");
             await window.Dispatcher.InvokeAsync(()=>{},DispatcherPriority.ContextIdle);
             var positions=window.IconPositions();
             // 八列开始菜单网格：七个图标应全部落在第一行，列间距约 93px 且均匀。
@@ -266,6 +421,20 @@ internal static class NativeVerification
                 checks.Add($"Icon bitmaps are supersampled: {iconSource.PixelWidth}px source for {physical:F0}px display");
             }
             else checks.Add("Main-grid icons request 2x supersampled Shell bitmaps");
+
+            // 图标透明边缘专项：只清理白色透明像素与未预乘数据，不触碰不透明图形。
+            const int ew=8;var alphaProbe=new byte[ew*ew*4];
+            for(int o=0;o<alphaProbe.Length;o+=4){alphaProbe[o]=255;alphaProbe[o+1]=255;alphaProbe[o+2]=255;alphaProbe[o+3]=0;}
+            void PutProbe(int x,int y,byte b,byte g,byte r,byte a){int o=(y*ew+x)*4;alphaProbe[o]=b;alphaProbe[o+1]=g;alphaProbe[o+2]=r;alphaProbe[o+3]=a;}
+            PutProbe(1,1,255,255,255,100);  // 未预乘的半透明白边
+            PutProbe(2,2,255,255,255,30);   // 几乎透明的白色 fringe
+            PutProbe(4,4,180,20,30,255);    // 不透明的蓝色主体
+            SharpIcons.NormalizeIconAlpha(alphaProbe);
+            if(alphaProbe[0]!=0||alphaProbe[1]!=0||alphaProbe[2]!=0)throw new Exception("透明像素的白色 RGB 未清零。");
+            if(alphaProbe[(1*ew+1)*4]!=100||alphaProbe[(1*ew+1)*4+3]!=100)throw new Exception("半透明边缘未按 alpha 预乘。");
+            if(alphaProbe[(2*ew+2)*4+3]!=0)throw new Exception("白色 fringe 未被丢弃。");
+            if(alphaProbe[(4*ew+4)*4]!=180||alphaProbe[(4*ew+4)*4+3]!=255)throw new Exception("不透明图标主体被改动。");
+            checks.Add("Icon alpha normalization clears white transparent edges without touching opaque artwork");
 
             // 聚焦底线专项：确认按圆角轮廓收口、有淡入动画，并渲染 4 倍放大图供视觉核对。
             window.IconSearch.ApplyTemplate();

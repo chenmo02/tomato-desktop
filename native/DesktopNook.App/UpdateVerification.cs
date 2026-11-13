@@ -10,7 +10,7 @@ internal static class UpdateVerification
         Directory.CreateDirectory(root);var profile=Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"DesktopNook.UpdateVerification-"+Guid.NewGuid().ToString("N"));var desktop=Path.Combine(profile,"Desktop");Directory.CreateDirectory(desktop);
         var data=Path.Combine(profile,"Data");var store=new DesktopNook.Core.NookStore(data,[desktop],new SandboxRecycle(profile));
         var doc=Path.Combine(desktop,"更新保留内容.url");File.WriteAllText(doc,"user edited data");var item=store.Collect(doc,"office");store.RenameCategory("office","用户分类");
-        var targetDir=Path.Combine(root,"portable");Directory.CreateDirectory(targetDir);var target=Path.Combine(targetDir,"DesktopNook.exe");File.Copy(oldExe,target,false);
+        var targetDir=Path.Combine(root,"target");Directory.CreateDirectory(targetDir);var target=Path.Combine(targetDir,"DesktopNook.exe");File.Copy(oldExe,target,false);
         var before=LocalUpdater.Hash(Path.Combine(data,"state.json"));var staged=LocalUpdater.Stage(candidate,target,data,profile,0);
         var helperStart=new ProcessStartInfo(staged.Helper){UseShellExecute=false,CreateNoWindow=true};helperStart.ArgumentList.Add("--apply-update");helperStart.ArgumentList.Add(staged.Plan);
         int result;using(var helper=Process.Start(helperStart)!){if(!helper.WaitForExit(30000))throw new IOException("更新助手未结束。");result=helper.ExitCode;}

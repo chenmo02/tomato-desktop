@@ -100,7 +100,9 @@ public partial class MainWindow
                 Dispatcher.BeginInvoke(new Action(()=>
                 {
                     ApplyBackdrop();
+                    // 标记取色已过期；面板收起时只更新材质声明，壁纸与背景层等恢复后再建。
                     _glassWallpaper=null;
+                    if(_resourcesSuspended)return;
                     RefreshGlassWallpaper();
                     UpdateSkinBackdropViewbox();
                 }));
@@ -148,6 +150,7 @@ public partial class MainWindow
 
     private void RefreshGlassWallpaper()
     {
+        if(_resourcesSuspended)return;
         var path=GlassBackdrop.WallpaperPath();
         if(ThemeService.IsGlass)
         {
@@ -170,8 +173,45 @@ public partial class MainWindow
 
     // 切换 DWM 系统背板：玻璃皮肤用实时 Acrylic，原生皮肤用 Mica。
     // 背板失败时 BackdropService 会把状态置为 None，自绘壁纸层照常接管。
+    // 材质状态一旦变化，必须让自绘背景层失效：若早期声明失败时铺了不透明渐变，
+    // 后来背板再生效也会被整块盖住，表现为「启动不透明，进设置切一次 UI 才透明」。
     internal void ApplyBackdrop()
-        =>BackdropService.Apply(this,ThemeService.IsGlass?BackdropKind.Acrylic:BackdropKind.Mica);
+    {
+        var before=BackdropService.Current;
+        BackdropService.Apply(this,ThemeService.IsGlass?BackdropKind.Acrylic:BackdropKind.Mica);
+        if(BackdropService.Current==before)return;
+        _glassWallpaper=null;
+        SkinBackdrop.Children.Clear();
+        _skinWallpaperBrush=null;
+    }
+
+    // 按当前材质状态强制重建背景层。供窗口首帧完成后收敛启动态使用：
+    // 只清空缓存与旧层，壁纸解码仍走原有的后台刷新路径。
+    internal void ResyncSkinBackdrop()
+    {
+        if(_resourcesSuspended)return;
+        _glassWallpaper=null;
+        SkinBackdrop.Children.Clear();
+        _skinWallpaperBrush=null;
+        RefreshGlassWallpaper();
+        UpdateSkinBackdropViewbox();
+    }
+
+    // 挂起 / 恢复后台资源。壁纸平均色调（_glassWallpaper）是几个字节的字符串，
+    // 特意保留：恢复显示时原生皮肤无需重新解码壁纸取色，只有玻璃皮肤要重建背景层。
+    internal void ReleaseBackdropVisuals()
+    {
+        SkinBackdrop.Children.Clear();
+        _skinWallpaperBrush=null;
+        _skinWallpaperImage=null;
+        _skinWallpaperPath=null;
+    }
+    internal void RestoreBackdropVisuals()
+    {
+        if(_resourcesSuspended)return;
+        if(ThemeService.IsGlass){RebuildSkinBackdrop();UpdateSkinBackdropViewbox();}
+        else RefreshGlassWallpaper();
+    }
 
     // 皮肤几何与背景层：色板由 ThemeService 整表替换，这里只处理画刷无法表达的形态差异。
     // 原生皮肤把圆角、光晕、背景层全部复位，保证原外观 1:1 不变。
@@ -210,28 +250,52 @@ public partial class MainWindow
             _glassWallpaper=null;
         }
         UpdateGlassClip();
+        // 关闭按钮悬停红底的右上圆角必须跟随皮肤圆角，否则原生皮肤的 12px
+        // HWND 圆角会把直角红块右上角切掉一块。
+        UpdateCaptionCornerRadius();
         ApplyWindowRegion();
     }
 
-    // 窗口在屏幕上的物理像素矩形：PointToScreen 返回设备坐标，
-    // ActualWidth/Height 是逻辑像素，需要按当前 DPI 换算成同一单位。
+    [StructLayout(LayoutKind.Sequential)]
+    private struct ScreenRect { public int Left,Top,Right,Bottom; }
+    [DllImport("user32.dll")]
+    private static extern bool GetWindowRect(IntPtr hwnd,out ScreenRect rect);
+    [DllImport("user32.dll")]
+    private static extern int GetSystemMetrics(int index);
+    // 虚拟屏幕物理像素范围：SM_XVIRTUALSCREEN / SM_YVIRTUALSCREEN /
+    // SM_CXVIRTUALSCREEN / SM_CYVIRTUALSCREEN。扩展屏摆在左侧时原点为负值。
+    private const int SmXVirtualScreen=76,SmYVirtualScreen=77,SmCxVirtualScreen=78,SmCyVirtualScreen=79;
+
+    // 窗口在虚拟屏幕上的物理像素矩形。旧实现用 PointToScreen + ActualWidth×窗口 DPI，
+    // 混合 DPI 下 WPF 的 DPI 与窗口实际所在屏的 DPI 可能不同步；GetWindowRect 直接
+    // 给出物理坐标，再减掉虚拟屏幕原点，与壁纸铺放所用的屏幕尺寸保持同一坐标系。
     private Rect WindowScreenRect()
     {
         if(!IsLoaded||WindowState!=WindowState.Normal)return default;
         try
         {
-            var origin=PointToScreen(new Point(0,0));
-            var dpi=VisualTreeHelper.GetDpi(this);
-            return new Rect(origin.X,origin.Y,ActualWidth*dpi.DpiScaleX,ActualHeight*dpi.DpiScaleY);
+            var hwnd=new System.Windows.Interop.WindowInteropHelper(this).Handle;
+            if(hwnd==IntPtr.Zero||!GetWindowRect(hwnd,out var rect))return default;
+            var origin=new Point(GetSystemMetrics(SmXVirtualScreen),GetSystemMetrics(SmYVirtualScreen));
+            return new Rect(rect.Left-origin.X,rect.Top-origin.Y,rect.Right-rect.Left,rect.Bottom-rect.Top);
         }
         catch{return default;}
     }
 
+    // 壁纸按整个虚拟桌面铺放，而不是只按主屏。SystemParameters.PrimaryScreenWidth
+    // 是主屏的逻辑尺寸，乘窗口 DPI 在多屏/不同缩放组合下会算错裁切比例。
     private Size ScreenPixelSize()
     {
-        var dpi=VisualTreeHelper.GetDpi(this);
-        return new Size(SystemParameters.PrimaryScreenWidth*dpi.DpiScaleX,SystemParameters.PrimaryScreenHeight*dpi.DpiScaleY);
+        var width=GetSystemMetrics(SmCxVirtualScreen);
+        var height=GetSystemMetrics(SmCyVirtualScreen);
+        return width>0&&height>0
+            ?new Size(width,height)
+            :new Size(SystemParameters.PrimaryScreenWidth,SystemParameters.PrimaryScreenHeight);
     }
+    // 供自检直接核对混合 DPI 下的坐标换算，不改变运行时行为。
+    internal Rect DiagnosticWindowScreenRect()=>WindowScreenRect();
+    internal Size DiagnosticScreenPixelSize()=>ScreenPixelSize();
+    internal Rect DiagnosticGlassClipRect()=>GlassClip.Rect;
 
     // 壁纸样式：0 居中 / 2 拉伸 / 6 适应 / 10 填充 / 22 跨区；平铺由 TileWallpaper 另判。
     // 只区分「拉伸」与其余等比模式，其余统一按填充近似，不做逐屏枚举。
@@ -261,6 +325,7 @@ public partial class MainWindow
     // 玻璃背景层只在切换皮肤、深浅主题或壁纸时重建，不进入每帧渲染路径。
     private void RebuildSkinBackdrop(string? path=null)
     {
+        if(_resourcesSuspended)return;
         path??=GlassBackdrop.WallpaperPath();
         if(!string.Equals(path,_skinWallpaperPath,StringComparison.OrdinalIgnoreCase)||_skinWallpaperImage is null)
         {
