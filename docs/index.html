@@ -1,0 +1,701 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light">
+<title>番茄桌面 DesktopNook · 桌面别摊大饼了</title>
+<meta name="description" content="番茄桌面是 Windows 上的桌面收纳工具：点名哪几个图标就只收哪几个，之后从任务栏同一个入口按分类打开，不想要了一键还回桌面。">
+<link rel="icon" type="image/png" href="assets/app-icon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@700;900&display=swap" rel="stylesheet">
+<style>
+/* ============================================================
+   番茄桌面 · 单页官网 v2
+   视觉：Dopamine Design（保留高饱和撞色 / 900 大字 / 全圆角 / 彩色投影）
+   版式：编辑式拼贴 —— 海报首屏、前后对比、跑马灯、倾斜色带、
+         贴纸墙、皮肤切换、坦率便签、人群卡、全宽 CTA
+   文案：全部重写，事实以仓库 README 与 docs/ 为准
+   ============================================================ */
+:root{
+  --pink:#ff006e; --violet:#8338ec; --yellow:#ffbe0b;
+  --blue:#3a86ff; --mint:#06d6a0; --orange:#fb5607;
+  --ink:#1a1a1a; --ink-70:rgba(26,26,26,.74); --ink-55:rgba(26,26,26,.55);
+  --paper:#fff;
+  --wash-pink:rgba(255,0,110,.08); --wash-yellow:rgba(255,190,11,.14);
+  --wash-blue:rgba(58,134,255,.09); --wash-mint:rgba(6,214,160,.12);
+  --r-card:24px; --r-pill:999px;
+  --sh-pink:0 8px 30px rgba(255,0,110,.40);
+  --sh-pink-h:0 12px 40px rgba(255,0,110,.60);
+  --sh-violet:0 16px 50px rgba(131,56,236,.35);
+  --font:"Noto Sans SC","Inter","Segoe UI Variable Text","Segoe UI","Microsoft YaHei UI","Microsoft YaHei","PingFang SC",system-ui,sans-serif;
+  --max:1160px;
+}
+*,*::before,*::after{box-sizing:border-box}
+html{scroll-behavior:smooth;scroll-padding-top:84px}
+body{margin:0;background:var(--paper);color:var(--ink);font:700 15px/1.55 var(--font);overflow-x:hidden;-webkit-font-smoothing:antialiased}
+img{max-width:100%;display:block}
+a{color:inherit;text-decoration:none}
+button{font:inherit;cursor:pointer;border:0;background:none;color:inherit}
+h1,h2,h3{font-weight:900;letter-spacing:-.035em;margin:0}
+p{margin:0}
+ul{margin:0;padding:0;list-style:none}
+code,kbd{font-family:ui-monospace,"Cascadia Mono",Consolas,monospace;font-size:.92em}
+:focus-visible{outline:3px solid var(--violet);outline-offset:3px;border-radius:8px}
+.skip{position:absolute;left:16px;top:-80px;z-index:200;background:var(--yellow);color:var(--ink);padding:12px 22px;border-radius:var(--r-pill);font-weight:900;transition:top 200ms}
+.skip:focus{top:14px}
+.wrap{width:min(var(--max),calc(100% - 48px));margin-inline:auto}
+section{position:relative;overflow:hidden;padding:88px 0}
+section>.wrap{position:relative;z-index:2}
+.kicker{display:inline-flex;align-items:center;gap:8px;font-size:14px;font-weight:900;letter-spacing:.02em;padding:8px 18px;border-radius:var(--r-pill);background:var(--yellow);color:var(--ink);box-shadow:0 6px 18px rgba(255,190,11,.4)}
+.kicker--pink{background:#d9005c;color:#fff;box-shadow:var(--sh-pink)}
+.kicker--mint{background:var(--mint);color:var(--ink)}
+.head{font-size:clamp(30px,4.2vw,46px);line-height:1.1;margin:18px 0 12px}
+.head-sub{font-size:17px;line-height:1.6;color:var(--ink-70);font-weight:700}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:10px;font-size:18px;font-weight:900;padding:16px 32px;border-radius:var(--r-pill);transition:transform 200ms,box-shadow 200ms,background 200ms;text-align:center}
+.btn--pink{background:var(--pink);color:#fff;box-shadow:var(--sh-pink);text-shadow:0 1px 2px rgba(70,0,25,.35)}
+.btn--pink:hover{transform:translateY(-2px) scale(1.05);box-shadow:var(--sh-pink-h)}
+.btn--pink:active{transform:scale(.95)}
+.btn--outline{background:#fff;color:#c90055;box-shadow:inset 0 0 0 2px #d9005c,0 8px 24px rgba(255,0,110,.18)}
+.btn--outline:hover{transform:translateY(-2px) scale(1.04);background:var(--wash-pink)}
+.btn--outline:active{transform:scale(.95)}
+.btn--white{background:#fff;color:#c90055;box-shadow:0 10px 30px rgba(60,0,20,.22);text-shadow:none}
+.btn--white:hover{transform:translateY(-2px) scale(1.05)}
+.btn--white:active{transform:scale(.95)}
+.btn:disabled{opacity:.42;cursor:not-allowed;transform:none!important;box-shadow:none!important}
+.small{font-size:13px;line-height:1.7;color:var(--ink-70);font-weight:700}
+.blob{position:absolute;pointer-events:none;z-index:0;opacity:.2;border-radius:60% 40% 55% 45%}
+@keyframes drift{0%,100%{transform:translate(0,0) rotate(0)}50%{transform:translate(16px,-20px) rotate(16deg)}}
+.b1{width:340px;height:320px;background:var(--yellow);top:-120px;right:-110px;animation:drift 16s ease-in-out infinite}
+.b2{width:240px;height:230px;background:var(--pink);bottom:-120px;left:-90px;border-radius:45% 60% 40% 55%;animation:drift 20s ease-in-out infinite reverse}
+.b3{width:210px;height:200px;background:var(--violet);top:34%;right:5%;border-radius:55% 45% 60% 40%}
+.b4{width:280px;height:260px;background:var(--mint);top:-100px;left:-100px}
+
+/* ---------- 顶部 ---------- */
+.top{position:sticky;top:0;z-index:80;background:rgba(255,255,255,.94);backdrop-filter:blur(14px);border-bottom:3px solid transparent;border-image:linear-gradient(90deg,var(--pink),var(--violet),var(--blue),var(--yellow),var(--mint)) 1}
+.top-in{height:70px;display:flex;align-items:center;gap:20px}
+.mark{display:flex;align-items:center;gap:10px;font-size:19px;font-weight:900;white-space:nowrap}
+.mark img{width:40px;height:40px;object-fit:contain;filter:drop-shadow(0 4px 10px rgba(251,86,7,.3))}
+.mark small{font-size:11px;font-weight:700;color:var(--violet);letter-spacing:.04em}
+.mini-nav{display:flex;align-items:center;gap:4px;margin-left:auto}
+.mini-nav a{font-size:14px;font-weight:900;padding:9px 14px;border-radius:var(--r-pill);transition:background 200ms,color 200ms,transform 200ms}
+.mini-nav a:hover{background:#d9005c;color:#fff;transform:translateY(-2px)}
+.top-cta{font-size:14px;font-weight:900;padding:11px 20px;border-radius:var(--r-pill);background:var(--violet);color:#fff;box-shadow:0 8px 24px rgba(131,56,236,.35);white-space:nowrap;transition:transform 200ms,box-shadow 200ms}
+.top-cta:hover{transform:translateY(-2px) scale(1.04);box-shadow:0 12px 32px rgba(131,56,236,.5)}
+.menu{display:none;width:44px;height:44px;border-radius:var(--r-pill);background:var(--yellow);color:var(--ink);font-size:19px;font-weight:900;align-items:center;justify-content:center}
+
+/* ---------- 海报首屏 ---------- */
+.poster{padding:66px 0 40px}
+.poster-row{display:flex;align-items:flex-start;gap:28px;flex-wrap:wrap}
+.poster-title{font-size:clamp(52px,8.6vw,104px);line-height:.98;letter-spacing:-.055em;margin:22px 0 0}
+.poster-title em{font-style:normal;color:var(--pink)}
+.poster-title .under{position:relative;z-index:0;white-space:nowrap}
+.poster-title .under::after{content:"";position:absolute;z-index:-1;left:0;right:0;bottom:6px;height:14px;background:var(--yellow);border-radius:var(--r-pill);opacity:.8}
+.poster-slip{position:relative;align-self:flex-end;margin:0 0 8px auto;max-width:260px;background:var(--yellow);color:var(--ink);font-size:16px;font-weight:900;line-height:1.45;padding:18px 22px;border-radius:18px;transform:rotate(6deg);box-shadow:0 12px 28px rgba(255,190,11,.45)}
+.poster-slip::before{content:"";position:absolute;top:-14px;left:50%;width:76px;height:26px;background:rgba(255,255,255,.65);transform:translateX(-50%) rotate(-5deg);border-radius:3px}
+.poster-copy{max-width:660px;font-size:18px;line-height:1.65;color:var(--ink-70);font-weight:700;margin-top:26px}
+.poster-actions{display:flex;flex-wrap:wrap;gap:14px;margin-top:28px}
+.poster-meta{margin-top:18px;font-size:13px;font-weight:900;color:var(--violet);letter-spacing:.01em}
+
+/* 前后对比舞台 */
+.stage{margin-top:52px;border-radius:32px;padding:12px;background:linear-gradient(120deg,var(--pink),var(--violet) 55%,var(--blue));box-shadow:0 24px 60px rgba(131,56,236,.34);transform:rotate(-.8deg)}
+.stage-in{background:#fff;border-radius:24px;overflow:hidden}
+.stage-bar{display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:14px 20px;background:linear-gradient(90deg,var(--wash-yellow),var(--wash-pink))}
+.stage-bar strong{font-size:15px;font-weight:900}
+.stage-actions{display:flex;gap:8px;margin-left:auto}
+.stage-actions button{font-size:13px;font-weight:900;padding:10px 16px;border-radius:var(--r-pill);transition:transform 200ms,box-shadow 200ms}
+#feedBtn{background:var(--yellow);color:var(--ink);box-shadow:0 6px 18px rgba(255,190,11,.45)}
+#backBtn{background:#fff;color:var(--violet);box-shadow:inset 0 0 0 2px rgba(131,56,236,.35)}
+.stage-actions button:hover:not(:disabled){transform:translateY(-2px) scale(1.04)}
+.stage-actions button:active:not(:disabled){transform:scale(.95)}
+.stage-count{font-size:12px;font-weight:900;color:var(--violet)}
+.stage-canvas{display:grid;grid-template-columns:1.3fr .7fr}
+.desk{position:relative;min-height:290px;padding:22px;display:flex;flex-wrap:wrap;gap:14px;align-content:flex-start;background-color:var(--wash-blue);background-image:radial-gradient(rgba(58,134,255,.22) 1.2px,transparent 1.2px);background-size:20px 20px}
+.desk-tag{position:absolute;right:14px;bottom:10px;font-size:11px;font-weight:900;color:#17459e;opacity:.75}
+.dicon{width:86px;min-height:82px;background:#fff;border-radius:16px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;padding:8px 4px;box-shadow:0 8px 20px rgba(58,134,255,.2);animation:pop 220ms ease-out;transition:transform 200ms}
+.dicon:hover{transform:translateY(-4px) rotate(-2deg)}
+.dicon .chip{width:26px;height:26px;border-radius:8px;background:var(--c,var(--pink));box-shadow:0 4px 10px rgba(26,26,26,.16)}
+.dicon .n{font-size:11px;font-weight:900;white-space:nowrap}
+.dicon.picked{outline:3px dashed var(--orange);outline-offset:3px}
+@keyframes pop{from{transform:scale(.55);opacity:0}to{transform:scale(1);opacity:1}}
+.panel{border-left:6px solid var(--pink);padding:18px 18px 20px;background:#fff}
+.panel-head{display:flex;align-items:center;gap:8px;font-size:13px;font-weight:900;padding-bottom:12px;border-bottom:2px solid var(--wash-pink)}
+.panel-head span{margin-left:auto;font-size:10px;font-weight:900;color:var(--violet)}
+.panel-cats{display:flex;gap:6px;flex-wrap:wrap;margin:12px 0}
+.panel-cats i{font-style:normal;font-size:10px;font-weight:900;padding:5px 10px;border-radius:var(--r-pill);background:var(--wash-blue);color:#17459e}
+.panel-cats i:first-child{background:var(--pink);color:#fff}
+.panel-tiles{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;min-height:132px;align-content:start}
+.ptile{display:flex;flex-direction:column;align-items:center;gap:3px;padding:8px 2px;border-radius:12px;background:var(--wash-yellow);animation:pop 220ms ease-out}
+.ptile .chip{width:20px;height:20px;border-radius:7px;background:var(--c,var(--pink))}
+.ptile .n{font-size:9px;font-weight:900;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
+.panel-empty{grid-column:1/-1;align-self:center;text-align:center;font-size:12px;font-weight:700;color:var(--ink-55);padding:36px 0}
+.stage-status{text-align:center;font-size:12px;font-weight:900;color:#fff;background:rgba(28,0,42,.4);border-radius:var(--r-pill);padding:8px 16px;margin:12px 12px 2px;text-shadow:0 1px 2px rgba(20,0,30,.3)}
+
+/* ---------- 跑马灯 ---------- */
+.marquee{position:relative;z-index:3;overflow:hidden;max-width:100%;background:linear-gradient(90deg,var(--pink),var(--violet),var(--blue));padding:16px 0;transform:rotate(-1.2deg);box-shadow:0 14px 36px rgba(255,0,110,.3);margin:34px 0 0}
+.marquee-track{display:flex;width:max-content;animation:slide 26s linear infinite}
+.marquee-track span{font-size:17px;font-weight:900;color:#fff;white-space:nowrap;padding:0 22px;text-shadow:0 1px 3px rgba(30,0,40,.35)}
+.marquee-track b{color:var(--yellow)}
+@keyframes slide{from{transform:translateX(0)}to{transform:translateX(-50%)}}
+
+/* ---------- 三条动线 ---------- */
+.how{background:var(--wash-pink);padding-bottom:104px}
+.how-head{text-align:center;margin-bottom:44px}
+.bands{display:grid;gap:22px}
+.band{position:relative;display:grid;grid-template-columns:130px 1fr;align-items:center;gap:24px;width:106%;margin-left:-3%;padding:24px 44px;border-radius:var(--r-pill);box-shadow:var(--sh-violet);transition:transform 200ms,box-shadow 200ms}
+.band:nth-child(1){background:var(--yellow);color:var(--ink);transform:rotate(-1.4deg);box-shadow:0 14px 36px rgba(255,190,11,.45)}
+.band:nth-child(2){background:linear-gradient(90deg,var(--violet),var(--blue));color:#fff;transform:rotate(1.1deg)}
+.band:nth-child(3){background:var(--mint);color:var(--ink);transform:rotate(-.9deg);box-shadow:0 14px 36px rgba(6,214,160,.4)}
+.band:hover{transform:rotate(0) scale(1.015)}
+.band .word{font-size:64px;font-weight:900;line-height:1;letter-spacing:-.06em}
+.band .line{font-size:clamp(17px,2vw,22px);font-weight:900;line-height:1.35}
+.band .line small{display:block;font-size:13px;font-weight:700;line-height:1.55;margin-top:6px;opacity:.88}
+
+/* ---------- 贴纸墙 ---------- */
+.extras{background:var(--wash-blue)}
+.stickers{display:grid;grid-template-columns:repeat(3,1fr);gap:22px;margin-top:40px}
+.sticky{position:relative;padding:28px 24px;border-radius:22px;background:#fff;box-shadow:0 14px 34px rgba(58,134,255,.2);transform:rotate(var(--rot,0deg));transition:transform 200ms,box-shadow 200ms;min-height:148px}
+.sticky:hover{transform:rotate(0deg) translateY(-6px) scale(1.02);box-shadow:0 20px 46px rgba(131,56,236,.3);z-index:3}
+.sticky:nth-child(1){--rot:-2.4deg;border-top:7px solid var(--pink)}
+.sticky:nth-child(2){--rot:1.8deg;border-top:7px solid var(--violet);margin-top:22px}
+.sticky:nth-child(3){--rot:-1.2deg;border-top:7px solid var(--orange)}
+.sticky:nth-child(4){--rot:1.4deg;border-top:7px solid var(--blue);margin-top:-10px}
+.sticky:nth-child(5){--rot:-2deg;border-top:7px solid var(--mint)}
+.sticky:nth-child(6){--rot:2.2deg;border-top:7px solid var(--pink);margin-top:18px}
+.sticky strong{display:block;font-size:18px;font-weight:900;line-height:1.4;margin-bottom:10px}
+.sticky p{font-size:13.5px;line-height:1.6;font-weight:700;color:var(--ink-70)}
+
+/* ---------- 皮肤切换 ---------- */
+.skin{background:var(--wash-yellow)}
+.skin-switch{display:inline-flex;gap:6px;background:#fff;padding:6px;border-radius:var(--r-pill);box-shadow:0 8px 24px rgba(255,190,11,.35);margin:24px 0}
+.skin-switch button{font-size:14px;font-weight:900;padding:11px 22px;border-radius:var(--r-pill);transition:background 200ms,color 200ms,transform 200ms}
+.skin-switch button[aria-pressed="true"]{background:var(--pink);color:#fff;box-shadow:var(--sh-pink)}
+.skin-switch button:not([aria-pressed="true"]):hover{background:var(--wash-pink);transform:translateY(-2px)}
+.skin-layout{display:grid;grid-template-columns:1fr 1fr;gap:32px;align-items:center}
+.preview{padding:16px;border-radius:30px;background:linear-gradient(135deg,var(--violet),var(--blue));box-shadow:var(--sh-violet);transition:background 300ms}
+.preview[data-skin="glass"]{--win-accent:var(--pink);background:linear-gradient(135deg,var(--pink),var(--orange))}
+.win{background:var(--win-bg,#fff);border-radius:var(--win-r,18px);overflow:hidden;box-shadow:0 12px 30px rgba(26,26,26,.2);transition:background 300ms,border-radius 300ms}
+.preview[data-skin="glass"] .win{--win-bg:rgba(255,255,255,.82);--win-r:8px;backdrop-filter:blur(10px)}
+.win-bar{height:38px;display:flex;align-items:center;gap:7px;padding:0 14px;background:var(--win-bar,var(--wash-blue));font-size:11px;font-weight:900}
+.preview[data-skin="glass"] .win-bar{--win-bar:rgba(255,0,110,.16)}
+.win-bar i{width:8px;height:8px;border-radius:50%;background:var(--pink);display:block}
+.win-bar i:nth-child(2){background:var(--yellow)} .win-bar i:nth-child(3){background:var(--mint)}
+.win-bar span{margin-left:auto;color:var(--win-accent,#0067c0)}
+.win-body{display:grid;grid-template-columns:92px 1fr;min-height:190px}
+.win-side{padding:12px 8px;background:var(--win-side,var(--wash-blue))}
+.preview[data-skin="glass"] .win-side{--win-side:rgba(131,56,236,.1)}
+.win-side i{display:block;height:12px;border-radius:6px;background:rgba(58,134,255,.25);margin:10px 4px}
+.win-side i:first-child{background:var(--win-accent,#0067c0);width:70%}
+.win-main{padding:14px;display:grid;grid-template-columns:repeat(4,1fr);gap:10px;align-content:start}
+.win-main i{height:38px;border-radius:10px;background:var(--wash-yellow)}
+.win-main i:nth-child(2n){background:var(--wash-pink)}
+.win-main i:nth-child(3n){background:var(--wash-mint)}
+.skin-copy{font-size:16px;line-height:1.7;font-weight:700;color:var(--ink-70)}
+.skin-copy strong{display:block;font-size:22px;font-weight:900;color:var(--ink);margin-bottom:12px}
+.skin-copy .skin-desc{min-height:96px}
+.skin-foot{margin-top:20px;background:#fff;border-radius:var(--r-card);padding:16px 22px;font-size:14px;font-weight:900;box-shadow:0 8px 24px rgba(255,190,11,.35)}
+
+/* ---------- 坦率便签 ---------- */
+.honest{background:var(--paper)}
+.note-wrap{max-width:920px;margin:36px auto 0;position:relative}
+.note{position:relative;background:var(--yellow);color:var(--ink);border:4px solid #fff;border-radius:10px 28px 10px 28px;padding:46px 48px 40px;transform:rotate(-1.3deg);box-shadow:0 22px 54px rgba(255,190,11,.48)}
+.tape{position:absolute;top:-18px;left:50%;width:150px;height:34px;background:rgba(255,255,255,.62);transform:translateX(-50%) rotate(-3deg);border-radius:3px;box-shadow:0 3px 8px rgba(26,26,26,.12)}
+.note h2{font-size:clamp(30px,4vw,44px);margin-bottom:18px}
+.note p{font-size:16px;line-height:1.85;font-weight:700}
+.note .fine{font-size:13px;line-height:1.75;margin-top:18px;padding-top:16px;border-top:2px dashed rgba(26,26,26,.25)}
+.stamps{display:flex;flex-wrap:wrap;gap:18px;margin-top:28px}
+.stamp{width:88px;height:88px;border-radius:50%;border:4px solid var(--pink);color:#c90055;display:grid;place-items:center;text-align:center;font-size:12px;font-weight:900;line-height:1.35;padding:8px;transform:rotate(var(--r,0deg))}
+.stamp:nth-child(1){--r:-12deg} .stamp:nth-child(2){--r:9deg;border-color:var(--violet);color:var(--violet)} .stamp:nth-child(3){--r:-6deg;border-color:#00795c;color:#00795c}
+
+/* ---------- 对号入座 ---------- */
+.who{background:var(--wash-pink)}
+.who-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:20px;margin-top:40px}
+.who-card{position:relative;overflow:hidden;border-radius:26px;padding:30px 26px;color:#fff;min-height:270px;box-shadow:var(--sh-violet);transition:transform 200ms,box-shadow 200ms}
+.who-card:nth-child(1){background:linear-gradient(140deg,var(--pink),var(--violet))}
+.who-card:nth-child(2){background:linear-gradient(140deg,var(--violet),var(--blue))}
+.who-card:nth-child(3){background:linear-gradient(140deg,var(--orange),var(--pink))}
+.who-card:hover{transform:translateY(-6px) rotate(-1deg)}
+.who-card::before{content:"";position:absolute;inset:0;pointer-events:none;background:linear-gradient(180deg,rgba(28,0,42,.02),rgba(28,0,42,.30))}
+.who-card>*{position:relative;z-index:1}
+.who-card h3{font-size:21px;margin-bottom:12px}
+.who-card p{font-size:14.5px;line-height:1.7;color:rgba(255,255,255,.97);text-shadow:0 1px 2px rgba(20,0,30,.26)}
+
+/* ---------- 下载票券 CTA ---------- */
+.get{padding:0 0 88px}
+.cta{position:relative;display:grid;grid-template-columns:1.35fr .65fr;width:calc(100% - 24px);margin-inline:auto;color:#fff;border:5px solid #fff;border-radius:30px;transform:rotate(-1.2deg);background:linear-gradient(115deg,rgba(35,0,45,.06),rgba(45,0,10,.26)),linear-gradient(115deg,var(--pink),var(--orange) 48%,var(--violet));box-shadow:0 24px 60px rgba(255,0,110,.36)}
+.cta::before,.cta::after{content:"";position:absolute;left:67.5%;width:34px;height:34px;border-radius:50%;background:#fff;transform:translateX(-50%);z-index:3}
+.cta::before{top:-19px} .cta::after{bottom:-19px}
+.cta-main{position:relative;z-index:1;padding:48px 44px 46px}
+.cta-tag{display:inline-flex;align-items:center;font-size:13px;font-weight:900;padding:8px 18px;border-radius:var(--r-pill);background:var(--yellow);color:var(--ink);box-shadow:0 6px 18px rgba(255,190,11,.4);transform:rotate(-3deg)}
+.cta-main h2{font-size:clamp(34px,4.8vw,56px);line-height:1.08;margin:20px 0 16px;text-shadow:0 2px 4px rgba(30,0,30,.28)}
+.cta-main h2 em{font-style:normal;color:var(--yellow)}
+.cta-main p{font-size:16px;line-height:1.65;color:rgba(255,255,255,.97);max-width:460px;text-shadow:0 1px 2px rgba(20,0,30,.26)}
+.cta-main .btn{margin-top:26px}
+.cta-stub{position:relative;z-index:1;padding:44px 30px 40px;border-left:3px dashed rgba(255,255,255,.7);display:flex;flex-direction:column;justify-content:center;gap:14px}
+.cta-stub-title{font-size:12px;font-weight:900;letter-spacing:.08em;color:rgba(255,255,255,.92)}
+.cta-file{display:block;background:rgba(255,255,255,.94);color:#c90055;border-radius:14px;padding:14px 16px;font-size:13px;font-weight:900;word-break:break-all;box-shadow:0 8px 20px rgba(40,0,20,.16)}
+.cta-info{font-size:12.5px;line-height:1.7;font-weight:700;color:rgba(255,255,255,.97);text-shadow:0 1px 2px rgba(20,0,30,.26)}
+.cta-links{display:flex;flex-wrap:wrap;gap:8px;margin-top:4px}
+.cta-links a{font-size:12px;font-weight:900;padding:9px 14px;border-radius:var(--r-pill);background:rgba(255,255,255,.94);color:#a8004a;transition:transform 200ms,background 200ms}
+.cta-links a:hover{transform:translateY(-3px);background:#fff;color:var(--pink)}
+.cta-dot{position:absolute;width:20px;height:20px;border-radius:50%;background:var(--yellow);right:16%;top:9%;z-index:2}
+.cta-dot--b{width:12px;height:12px;background:var(--mint);right:7%;bottom:8%}
+.build{display:flex;flex-wrap:wrap;align-items:center;gap:12px;margin-top:26px;background:#fff;border-radius:18px;padding:16px 20px;box-shadow:0 8px 24px rgba(131,56,236,.16)}
+.build b{font-size:12px;font-weight:900;padding:7px 14px;border-radius:var(--r-pill);background:var(--yellow);color:var(--ink);white-space:nowrap}
+.build code{background:var(--wash-yellow);padding:6px 10px;border-radius:8px;color:var(--ink);font-size:12px}
+.build span{font-size:12px;line-height:1.6;font-weight:700;color:var(--ink-70);flex:1;min-width:220px}
+@media (max-width:820px){
+  .cta{grid-template-columns:1fr;width:100%;transform:none}
+  .cta::before,.cta::after{display:none}
+  .cta-main{padding:38px 30px 32px}
+  .cta-stub{border-left:0;border-top:3px dashed rgba(255,255,255,.7);padding:30px}
+  .cta-dot{display:none}
+}
+@media (max-width:640px){
+  .cta-main{padding:32px 22px 28px}
+  .cta-main h2{font-size:clamp(32px,9vw,44px)}
+  .cta-main .btn{width:100%}
+  .cta-stub{padding:26px 22px}
+  .build{padding:14px 16px}
+  .build code{word-break:break-all}
+}
+
+/* ---------- 页脚 ---------- */
+.foot{position:relative;overflow:hidden;color:#fff;padding:44px 0 34px;background:linear-gradient(100deg,rgba(35,0,45,.10),rgba(45,0,10,.26)),linear-gradient(100deg,var(--violet),var(--blue) 60%,var(--pink))}
+.foot-in{position:relative;z-index:1;display:flex;flex-wrap:wrap;gap:20px;align-items:center;justify-content:space-between}
+.foot-brand{display:flex;align-items:center;gap:12px;font-size:17px;font-weight:900}
+.foot-brand img{width:46px;height:46px;filter:drop-shadow(0 6px 14px rgba(0,0,0,.22))}
+.foot-brand small{display:block;font-size:11px;font-weight:700;color:rgba(255,255,255,.92)}
+.foot-links{display:flex;flex-wrap:wrap;gap:8px}
+.foot-links a{font-size:12px;font-weight:900;padding:9px 16px;border-radius:var(--r-pill);background:rgba(255,255,255,.92);color:#a8004a;transition:transform 200ms}
+.foot-links a:hover{transform:translateY(-3px)}
+.foot-bottom{margin-top:24px;padding-top:18px;border-top:1px solid rgba(255,255,255,.4);font-size:11.5px;line-height:1.8;font-weight:700;color:rgba(255,255,255,.95);display:flex;flex-wrap:wrap;gap:6px 24px;justify-content:space-between}
+
+/* ---------- 入场 ---------- */
+.js .reveal{opacity:0;transform:translateY(20px);transition:opacity 480ms cubic-bezier(.2,.8,.2,1),transform 480ms cubic-bezier(.2,.8,.2,1)}
+.js .reveal.in-view{opacity:1;transform:none}
+
+/* ---------- 响应式 ---------- */
+@media (max-width:1000px){
+  .stage-canvas{grid-template-columns:1fr}
+  .panel{border-left:0;border-top:6px solid var(--pink)}
+  .skin-layout{grid-template-columns:1fr}
+  .stickers{grid-template-columns:repeat(2,1fr)}
+  .who-grid{grid-template-columns:1fr 1fr}
+  .poster-slip{max-width:220px}
+}
+@media (max-width:820px){
+  section{padding:72px 0}
+  .menu{display:flex}
+  .mini-nav{position:absolute;top:70px;left:0;right:0;display:none;flex-direction:column;align-items:stretch;gap:6px;background:#fff;padding:14px 24px 22px;box-shadow:0 18px 40px rgba(255,0,110,.22);border-bottom:3px solid var(--pink)}
+  .mini-nav.is-open{display:flex}
+  .mini-nav a{font-size:16px;padding:12px 18px}
+  .top-cta{display:none}
+  .band{grid-template-columns:92px 1fr;gap:14px;padding:20px 26px}
+  .band .word{font-size:48px}
+  .note{padding:38px 30px 32px}
+}
+@media (max-width:640px){
+  .wrap{width:calc(100% - 32px)}
+  section{padding:62px 0}
+  .mark small{display:none}
+  .poster{padding-top:44px}
+  .poster-title{font-size:clamp(46px,12vw,64px)}
+  .poster-slip{margin:18px 0 0;transform:rotate(3deg);max-width:100%}
+  .poster-copy{font-size:16px}
+  .btn{font-size:16px;padding:14px 24px;width:100%}
+  .poster-actions{flex-direction:column}
+  .stage{margin-top:38px;transform:none}
+  .stage-actions{margin-left:0;width:100%}
+  .stage-actions button{flex:1}
+  .desk{min-height:230px;padding:16px;gap:10px}
+  .dicon{width:72px;min-height:72px}
+  .panel-tiles{grid-template-columns:repeat(4,1fr)}
+  .marquee{transform:none}
+  .band{width:100%;margin-left:0;grid-template-columns:64px 1fr;gap:10px;padding:18px 20px;border-radius:22px;transform:none!important}
+  .band .word{font-size:40px}
+  .band .line{font-size:16px}
+  .stickers,.who-grid{grid-template-columns:1fr}
+  .sticky{margin-top:0!important;transform:rotate(var(--rot,0deg))}
+  .sticky:hover{transform:rotate(0)}
+  .who-card{min-height:auto}
+  .note{border-radius:8px 20px 8px 20px;padding:34px 22px 28px;transform:none}
+  .note p{font-size:14.5px}
+  .stamp{width:74px;height:74px;font-size:11px}
+  .get{padding-bottom:62px}
+  .blob{opacity:.13}
+  .foot-in{flex-direction:column;align-items:flex-start}
+}
+@media (prefers-reduced-motion:reduce){
+  html{scroll-behavior:auto}
+  *,*::before,*::after{animation-duration:.001ms!important;animation-iteration-count:1!important;transition-duration:.001ms!important}
+  .js .reveal{opacity:1;transform:none}
+  .marquee-track{animation:none;transform:none}
+}
+/* 紫蓝色带上的小字补强对比度 */
+.band:nth-child(2) .line small{opacity:1;text-shadow:0 1px 2px rgba(20,0,40,.38)}
+
+/* ---------- 首屏右侧品牌拼贴 ----------
+   把文案收进左栏，右侧用「大图标 + 旋转贴纸 + 装饰色点」补足留白，
+   与左侧超大标题形成一次完整构图；不使用 emoji。 */
+.poster-row{display:grid;grid-template-columns:minmax(0,1.06fr) minmax(0,.94fr);gap:36px;align-items:stretch}
+.poster-lead{min-width:0;display:flex;flex-direction:column;justify-content:center}
+.poster-lead>.kicker{align-self:flex-start}
+.poster-copy{max-width:100%}
+.hero-collage{position:relative;min-height:440px}
+.collage-card{position:absolute;left:50%;top:50%;width:300px;height:300px;transform:translate(-50%,-50%) rotate(4deg);border-radius:36px;border:6px solid #fff;background:linear-gradient(140deg,var(--pink),var(--violet) 56%,var(--blue));box-shadow:0 24px 56px rgba(131,56,236,.38)}
+.collage-card::after{content:"";position:absolute;inset:0;border-radius:30px;background:linear-gradient(180deg,rgba(28,0,42,0),rgba(28,0,42,.20));pointer-events:none}
+.collage-ring{position:absolute;left:50%;top:50%;width:250px;height:250px;transform:translate(-50%,-50%);border:3px dashed rgba(255,255,255,.78);border-radius:50%;animation:spin 30s linear infinite}
+@keyframes spin{to{transform:translate(-50%,-50%) rotate(360deg)}}
+.collage-mascot{position:absolute;left:50%;top:50%;width:186px;height:186px;object-fit:contain;padding:14px;background:#fff;border-radius:50%;transform:translate(-50%,-50%) rotate(-7deg);box-shadow:0 16px 36px rgba(40,0,30,.28);animation:bob 5s ease-in-out infinite}
+@keyframes bob{0%,100%{transform:translate(-50%,-50%) rotate(-7deg)}50%{transform:translate(-50%,-56%) rotate(-2deg)}}
+.cc{position:absolute;z-index:3;font-size:13px;font-weight:900;padding:10px 16px;border-radius:var(--r-pill);white-space:nowrap;box-shadow:0 8px 20px rgba(26,26,26,.16)}
+.cc--1{top:4%;left:2%;background:var(--yellow);color:var(--ink);transform:rotate(-8deg)}
+.cc--2{top:25%;right:0;background:var(--mint);color:var(--ink);transform:rotate(7deg)}
+.cc--3{bottom:25%;left:0;background:#fff;color:#c90055;box-shadow:inset 0 0 0 2px var(--pink),0 8px 20px rgba(255,0,110,.24);transform:rotate(6deg)}
+.cc--4{bottom:5%;right:2%;background:var(--blue);color:#fff;transform:rotate(-5deg)}
+.slip{position:absolute;z-index:4;right:2%;bottom:14%;max-width:186px;background:var(--yellow);color:var(--ink);font-size:14px;font-weight:900;line-height:1.45;padding:16px 18px;border-radius:16px;transform:rotate(7deg);box-shadow:0 12px 28px rgba(255,190,11,.45)}
+.slip::before{content:"";position:absolute;top:-12px;left:50%;width:62px;height:22px;background:rgba(255,255,255,.65);transform:translateX(-50%) rotate(-5deg);border-radius:3px}
+.cdot{position:absolute;z-index:2;border-radius:50%}
+.cdot--a{width:22px;height:22px;background:var(--orange);top:12%;right:15%}
+.cdot--b{width:14px;height:14px;background:var(--blue);bottom:12%;left:15%}
+.cdot--c{width:18px;height:18px;background:var(--violet);top:52%;left:2%;border-radius:6px;transform:rotate(20deg)}
+@media (max-width:1000px){
+  .poster-row{grid-template-columns:1fr;gap:20px}
+  .poster-lead{justify-content:flex-start}
+  .hero-collage{min-height:340px}
+  .collage-card{width:250px;height:250px}
+  .collage-ring{width:208px;height:208px}
+  .collage-mascot{width:156px;height:156px}
+  .cc{font-size:12px;padding:9px 14px}
+  .slip{display:none}
+}
+@media (max-width:640px){
+  .hero-collage{min-height:300px}
+  .collage-card{width:210px;height:210px;border-width:5px}
+  .collage-ring{width:176px;height:176px}
+  .collage-mascot{width:132px;height:132px;padding:10px}
+  .cc{font-size:11px;padding:8px 12px}
+  .slip{display:none}
+  .cdot--a{right:9%}
+}
+@media (prefers-reduced-motion:reduce){.collage-mascot,.collage-ring{animation:none}}
+</style>
+</head>
+<body>
+<a class="skip" href="#main">跳到主要内容</a>
+
+<header class="top">
+  <div class="wrap top-in">
+    <a class="mark" href="#top" aria-label="番茄桌面，回到顶部"><img src="assets/app-icon.png" alt="" width="40" height="40">番茄桌面 <small>DesktopNook</small></a>
+    <nav class="mini-nav" id="nav" aria-label="页面导航">
+      <a href="#how">怎么玩</a>
+      <a href="#skin">长什么样</a>
+      <a href="#honest">先说清楚</a>
+      <a href="#get">拿安装包</a>
+    </nav>
+    <a class="top-cta" href="#get">拿走安装包 ↓</a>
+    <button class="menu" id="menu" type="button" aria-label="展开导航菜单" aria-expanded="false" aria-controls="nav">☰</button>
+  </div>
+</header>
+
+<main id="main">
+  <!-- ===== 海报首屏 + 前后对比 ===== -->
+  <section class="poster" id="top">
+    <span class="blob b1" aria-hidden="true"></span>
+    <span class="blob b2" aria-hidden="true"></span>
+    <div class="wrap">
+      <div class="poster-row reveal">
+        <div class="poster-lead">
+          <h1 class="poster-title">桌面别<br><em class="under">摊大饼了。</em></h1>
+          <p class="poster-copy">桌面上你挑中的那几个，会进到番茄肚子里；想用的时候，任务栏点一下，按自己起的分类找出来单击就开。哪天不想要了，再让它们原样回到桌面。就这么点事。</p>
+          <div class="poster-actions">
+            <a class="btn btn--pink" href="#get">拿走安装包 ↓</a>
+            <a class="btn btn--outline" href="#how">看它怎么干活 →</a>
+          </div>
+        </div>
+        <div class="hero-collage">
+          <span class="collage-card" aria-hidden="true"></span>
+          <span class="collage-ring" aria-hidden="true"></span>
+          <img class="collage-mascot" src="assets/app-icon.png" alt="番茄桌面程序图标：一颗抱着蓝色文件夹的番茄">
+          <span class="cc cc--1">只收点名的</span>
+          <span class="cc cc--2">剩下的原样不动</span>
+          <span class="cc cc--3">改错了能退</span>
+          <span class="cc cc--4">一个入口就够了</span>
+          <span class="slip">点名哪几个<br>就只收哪几个</span>
+          <span class="cdot cdot--a" aria-hidden="true"></span>
+          <span class="cdot cdot--b" aria-hidden="true"></span>
+          <span class="cdot cdot--c" aria-hidden="true"></span>
+        </div>
+      </div>
+
+      <div class="stage reveal" aria-label="桌面收纳前后对比演示">
+        <div class="stage-in">
+          <div class="stage-bar">
+            <strong>你的桌面 · 试着点一下</strong>
+            <div class="stage-actions">
+              <button type="button" id="feedBtn">喂给番茄</button>
+              <button type="button" id="backBtn">都还回去</button>
+            </div>
+            <span class="stage-count" id="stageCount" aria-live="polite">桌面 9 个 · 番茄 0 个</span>
+          </div>
+          <div class="stage-canvas">
+            <div class="desk" id="desk"><span class="desk-tag">没点名的，留在这儿</span></div>
+            <div class="panel">
+              <div class="panel-head">番茄桌面 <span>任务栏入口</span></div>
+              <div class="panel-cats"><i>全部</i><i>工作</i><i>娱乐</i><i>未分类</i></div>
+              <div class="panel-tiles" id="panelTiles"></div>
+            </div>
+          </div>
+          <p class="stage-status" id="stageStatus" role="status" aria-live="polite">带橙色虚线圈的 5 个是被点名的，点「喂给番茄」看看它们去哪儿</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <div class="marquee" aria-label="产品关键词">
+    <div class="marquee-track" id="track">
+      <span>只收点名的 <b>✦</b> 不搬整张桌面 <b>✦</b> 想拿就拿回来 <b>✦</b> 分类自己起 <b>✦</b> 20 步能反悔 <b>✦</b> 两套皮肤 <b>✦</b> 一个任务栏入口 <b>✦</b></span>
+      <span aria-hidden="true">只收点名的 <b>✦</b> 不搬整张桌面 <b>✦</b> 想拿就拿回来 <b>✦</b> 分类自己起 <b>✦</b> 20 步能反悔 <b>✦</b> 两套皮肤 <b>✦</b> 一个任务栏入口 <b>✦</b></span>
+    </div>
+  </div>
+
+  <!-- ===== 三条动线 ===== -->
+  <section class="how" id="how">
+    <span class="blob b3" aria-hidden="true"></span>
+    <div class="wrap">
+      <div class="how-head reveal">
+        <span class="kicker">说白了，就三下</span>
+        <h2 class="head">不用学，拖一下就会</h2>
+        <p class="head-sub">没有连接串、没有账号、没有「先建个工程」这回事。</p>
+      </div>
+      <div class="bands">
+        <div class="band reveal"><div class="word">挑</div><div class="line">点谁谁进番茄，没点名的一个都不动。<small>拖进面板，或者「＋ 喂给番茄」一次多选；顺手拖到左边分类行就能归类。</small></div></div>
+        <div class="band reveal"><div class="word">找</div><div class="line">任务栏点一下，按自己起的分类找，单击就开。<small>搜索框打个名字按回车，直接开第一个匹配项；分类能新建、改名、拖着排。</small></div></div>
+        <div class="band reveal"><div class="word">还</div><div class="line">右键、拖出去，或「全部移除」，整批还回桌面。<small>同名不覆盖、自动改名；反悔了按 Ctrl+Z，最近 20 步都能退。</small></div></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===== 贴纸墙 ===== -->
+  <section class="extras" id="extras">
+    <span class="blob b4" aria-hidden="true"></span>
+    <div class="wrap">
+      <div class="reveal">
+        <span class="kicker kicker--mint">顺手的事，也顺手做了</span>
+        <h2 class="head">这些不用设置，装好就在</h2>
+        <p class="head-sub">不是功能清单，是几个你迟早会撞上的小场面。</p>
+      </div>
+      <div class="stickers">
+        <article class="sticky reveal"><strong>直接把文件递过去</strong><p>拖到微信、浏览器或资源管理器，会切成 Windows 标准拖放；网址快捷方式还会变成链接。托管文件只让复制，不会被搬走。</p></article>
+        <article class="sticky reveal"><strong>资源管理器里也有它</strong><p>左侧导航窗格多一个「番茄桌面」入口，点开就是收纳项的快捷方式；收纳、移回、改名、分类变化自己同步。</p></article>
+        <article class="sticky reveal"><strong>叫得来，也退得回</strong><p>Ctrl+Alt+T 随叫随到，Ctrl+Z 说反悔就反悔；操作日志留 30 天，热键被别的程序占了还能关掉。</p></article>
+        <article class="sticky reveal"><strong>图标不糊、不挂白圈</strong><p>按 2 倍物理像素向系统要图再高质量缩小，还把透明边缘的 alpha 归一化，圆边图标外沿那圈白边就没了。</p></article>
+        <article class="sticky reveal"><strong>收起之后会自己松手</strong><p>面板最小化时，壁纸位图、模糊背景层和图标缓存都先放一放，解码线程空闲 20 秒就退出；回来再按需重建。</p></article>
+        <article class="sticky reveal"><strong>升级不折腾</strong><p>更新会校验版本和文件，在原位置替换并重启，分类、收纳内容和设置都留着。</p></article>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===== 皮肤 ===== -->
+  <section class="skin" id="skin">
+    <div class="wrap">
+      <div class="reveal">
+        <span class="kicker kicker--pink">想正经，还是想透亮</span>
+        <h2 class="head">两套皮，点一下就换</h2>
+        <p class="head-sub">主题可以跟着系统深浅走，也可以固定；换皮肤会写进偏好，配置包导入导出会一起带走。</p>
+      </div>
+      <div class="skin-switch reveal" role="group" aria-label="切换皮肤预览">
+        <button type="button" data-skin="native" aria-pressed="true">原生系统</button>
+        <button type="button" data-skin="glass" aria-pressed="false">玻璃拟态</button>
+      </div>
+      <div class="skin-layout">
+        <div class="preview reveal" id="preview" data-skin="native" aria-label="窗口外观预览">
+          <div class="win">
+            <div class="win-bar"><i></i><i></i><i></i><span>番茄桌面</span></div>
+            <div class="win-body">
+              <div class="win-side"><i></i><i></i><i></i><i></i></div>
+              <div class="win-main"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+            </div>
+          </div>
+        </div>
+        <div class="skin-copy reveal">
+          <strong id="skinTitle">原生系统 · 安安稳稳</strong>
+          <p class="skin-desc" id="skinDesc">用静态 Mica 取桌面壁纸的平均色调，挡住背后窗口的实时透视，不显示壁纸图案；窗口圆角 12px，强调色跟着系统走。</p>
+          <div class="skin-foot">窗口 80%–150% 随便拉，图标和名字始终一样大，只是每行的数量跟着变</div>
+        </div>
+      </div>
+      <p class="small reveal" style="margin-top:18px">玻璃拟态要 Windows 11 22621+ 且系统「透明效果」打开才是真·Acrylic；不满足时会自动回退到按窗口位置对齐的模糊壁纸层。</p>
+    </div>
+  </section>
+
+  <!-- ===== 丑话便签 ===== -->
+  <section class="honest" id="honest">
+    <span class="blob b2" aria-hidden="true"></span>
+    <div class="wrap">
+      <div class="note-wrap reveal">
+        <div class="note">
+          <span class="tape" aria-hidden="true"></span>
+          <h2>丑话先说</h2>
+          <p>这程序会真的搬走文件，不是做个快捷方式糊弄你。普通文件和文件夹连内容一起托管，所以别去手删数据目录——要拿回来，走程序里的「移回桌面」或卸载恢复。玻璃皮肤挑系统；公共桌面的快捷方式常常只让读不让写；符号链接、目录联接和没落地的云占位内容先别喂；不同显示器缩放的组合还没一台一台试过。图标好不好看，最后还得看原应用给的资源。</p>
+          <p class="fine">跨卷托管的内容可能藏在原桌面同卷的隐藏 <code>.DesktopNookVault</code>，只备份 JSON 不够；卸载时若有没还回去的项目，会先把程序留着等你重试；反馈问题请附软件版本、Windows 版本、屏幕缩放和复现步骤，别公开上传整个数据目录或含个人路径的原始状态文件。</p>
+          <div class="stamps"><span class="stamp">同名<br>会改名</span><span class="stamp">会搬<br>真文件</span><span class="stamp">玻璃<br>挑系统</span></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===== 对号入座 ===== -->
+  <section class="who" id="who">
+    <div class="wrap">
+      <div class="reveal">
+        <span class="kicker">对号入座</span>
+        <h2 class="head">不用全看，挑你那张</h2>
+        <p class="head-sub">同一个工具，三种完全不同的用法。</p>
+      </div>
+      <div class="who-grid">
+        <article class="who-card reveal"><h3>图标多到不想数</h3><p>分类自己起、拖着排，搜索框回车直接开第一个。不想收的本来就还在桌面上，不会因为它装了就全给你搬走。</p></article>
+        <article class="who-card reveal"><h3>最怕文件弄丢</h3><p>收纳、移回、改名、排序都能撤销，日志留 30 天；拿回来走「移回桌面」，同名自动改名不覆盖。跨卷内容会藏在 .DesktopNookVault，备份时别忘了它。</p></article>
+        <article class="who-card reveal"><h3>爱折腾外观</h3><p>两套皮肤、深浅主题跟系统也能固定；热键、自启、自动收纳、失焦收起默认都能关。窗口拉大拉小，图标尺寸不变。</p></article>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===== 下载票券 CTA ===== -->
+  <section class="get" id="get">
+    <div class="wrap">
+      <div class="cta reveal">
+        <div class="cta-main">
+          <span class="cta-tag">就差这一步</span>
+          <h2>现在就把桌面<br><em>收起来</em></h2>
+          <p>一个安装包。装完把任务栏上那颗番茄固定住，就可以开始挑图标了。</p>
+          <a class="btn btn--white" href="https://github.com/chenmo02/tomato-desktop/releases/latest" target="_blank" rel="noopener noreferrer">拿走安装包 ↓</a>
+        </div>
+        <div class="cta-stub">
+          <span class="cta-dot" aria-hidden="true"></span>
+          <span class="cta-dot cta-dot--b" aria-hidden="true"></span>
+          <span class="cta-stub-title">你会拿到</span>
+          <code class="cta-file">DesktopNook-Setup.exe</code>
+          <span class="cta-info">Windows 10 / 11 x64 · 最新版本与附件以 Releases 页面为准</span>
+          <div class="cta-links">
+            <a href="https://github.com/chenmo02/tomato-desktop" target="_blank" rel="noopener noreferrer">看源码 ↗</a>
+            <a href="https://github.com/chenmo02/tomato-desktop/issues" target="_blank" rel="noopener noreferrer">提问题 ↗</a>
+            <a href="https://github.com/chenmo02/tomato-desktop/blob/master/docs/%E4%BD%BF%E7%94%A8%E8%AF%B4%E6%98%8E.md" target="_blank" rel="noopener noreferrer">使用说明 ↗</a>
+            <a href="https://github.com/chenmo02/tomato-desktop/releases/latest" target="_blank" rel="noopener noreferrer">历史版本 ↗</a>
+          </div>
+        </div>
+      </div>
+      <div class="build reveal">
+        <b>想自己编</b>
+        <code>pwsh -NoProfile -File native/scripts/Build.ps1</code>
+        <span>需要 .NET 10 SDK 与 PowerShell 7；打安装包另需 Unicode NSIS。调试请加 <code>--sandbox &lt;隔离目录&gt;</code>，正常运行会操作真实桌面。</span>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer class="foot">
+  <div class="wrap foot-in">
+    <div class="foot-brand"><img src="assets/app-icon.png" alt="" width="46" height="46"><div>番茄桌面 DesktopNook<small>by chenmo02 · 持续迭代中</small></div></div>
+    <div class="foot-links">
+      <a href="https://github.com/chenmo02/tomato-desktop" target="_blank" rel="noopener noreferrer">GitHub</a>
+      <a href="https://github.com/chenmo02/tomato-desktop/releases/latest" target="_blank" rel="noopener noreferrer">Releases</a>
+      <a href="https://github.com/chenmo02/tomato-desktop/issues" target="_blank" rel="noopener noreferrer">反馈</a>
+      <a href="#top">回到顶部 ↑</a>
+    </div>
+  </div>
+  <div class="wrap foot-bottom"><span>© <span id="year">2026</span> 番茄桌面 · 一个只收选中图标的 Windows 桌面工具</span><span>源码许可证待定，使用前请与维护者确认</span></div>
+</footer>
+
+<script>
+(function(){
+  "use strict";
+  document.documentElement.classList.add("js");
+  document.getElementById("year").textContent = String(new Date().getFullYear());
+
+  /* 移动端菜单 */
+  var menu = document.getElementById("menu"), nav = document.getElementById("nav");
+  function closeMenu(){ nav.classList.remove("is-open"); menu.setAttribute("aria-expanded","false"); menu.setAttribute("aria-label","展开导航菜单"); menu.textContent="☰"; }
+  menu.addEventListener("click", function(){
+    var open = nav.classList.toggle("is-open");
+    menu.setAttribute("aria-expanded", String(open));
+    menu.setAttribute("aria-label", open ? "收起导航菜单" : "展开导航菜单");
+    menu.textContent = open ? "✕" : "☰";
+  });
+  Array.prototype.forEach.call(nav.querySelectorAll("a"), function(a){ a.addEventListener("click", closeMenu); });
+  document.addEventListener("keydown", function(e){ if(e.key === "Escape") closeMenu(); });
+
+  /* 入场 */
+  var reveals = Array.prototype.slice.call(document.querySelectorAll(".reveal"));
+  if("IntersectionObserver" in window){
+    var io = new IntersectionObserver(function(entries){
+      entries.forEach(function(en){ if(en.isIntersecting){ en.target.classList.add("in-view"); io.unobserve(en.target); } });
+    }, {rootMargin:"0px 0px -6% 0px", threshold:.05});
+    reveals.forEach(function(el){ io.observe(el); });
+  } else { reveals.forEach(function(el){ el.classList.add("in-view"); }); }
+
+  /* 前后对比演示 */
+  var items = [
+    {c:"#ff006e", n:"季度汇报", picked:true},
+    {c:"#8338ec", n:"数据表",   picked:true},
+    {c:"#3a86ff", n:"游戏 A",   picked:true},
+    {c:"#fb5607", n:"画图",     picked:true},
+    {c:"#06d6a0", n:"项目资料", picked:true},
+    {c:"#ffbe0b", n:"浏览器",   picked:false},
+    {c:"#3a86ff", n:"壁纸",     picked:false},
+    {c:"#8338ec", n:"随手记",   picked:false},
+    {c:"#ff006e", n:"设置",     picked:false}
+  ];
+  var stored = false;
+  var desk = document.getElementById("desk"), tiles = document.getElementById("panelTiles");
+  var count = document.getElementById("stageCount"), status = document.getElementById("stageStatus");
+  var feedBtn = document.getElementById("feedBtn"), backBtn = document.getElementById("backBtn");
+  function esc(s){ return String(s).replace(/[&<>"']/g, function(c){ return {"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]; }); }
+  function render(){
+    var onDesk = items.filter(function(i){ return !(i.picked && stored); });
+    var inNook = stored ? items.filter(function(i){ return i.picked; }) : [];
+    desk.innerHTML = onDesk.map(function(i){
+      return '<div class="dicon' + (i.picked ? ' picked' : '') + '"><span class="chip" style="--c:' + i.c + '" aria-hidden="true"></span><span class="n">' + esc(i.n) + '</span></div>';
+    }).join("") + '<span class="desk-tag">没点名的，留在这儿</span>';
+    tiles.innerHTML = inNook.length
+      ? inNook.map(function(i){ return '<div class="ptile"><span class="chip" style="--c:' + i.c + '" aria-hidden="true"></span><span class="n">' + esc(i.n) + '</span></div>'; }).join("")
+      : '<div class="panel-empty">番茄还空着呢</div>';
+    count.textContent = "桌面 " + onDesk.length + " 个 · 番茄 " + inNook.length + " 个";
+    feedBtn.disabled = stored;
+    backBtn.disabled = !stored;
+  }
+  feedBtn.addEventListener("click", function(){
+    if(stored) return;
+    stored = true; render();
+    status.textContent = "5 个被点名的进了番茄，另外 4 个还在桌面上原样待着";
+  });
+  backBtn.addEventListener("click", function(){
+    if(!stored) return;
+    stored = false; render();
+    status.textContent = "全部还回桌面了，桌面跟开始一模一样";
+  });
+  render();
+
+  /* 皮肤切换 */
+  var preview = document.getElementById("preview");
+  var title = document.getElementById("skinTitle"), desc = document.getElementById("skinDesc");
+  var copy = {
+    native: {t:"原生系统 · 安安稳稳", d:"用静态 Mica 取桌面壁纸的平均色调，挡住背后窗口的实时透视，不显示壁纸图案；窗口圆角 12px，强调色跟着系统走。"},
+    glass:  {t:"玻璃拟态 · 透亮一点", d:"改用系统 Acrylic 实时透视背后桌面，圆角收小到 4px，强调色固定番茄红；要 Win11 22621+ 且开了透明效果，否则自动回退成模糊壁纸层。"}
+  };
+  Array.prototype.forEach.call(document.querySelectorAll(".skin-switch button"), function(btn){
+    btn.addEventListener("click", function(){
+      var key = btn.dataset.skin;
+      preview.dataset.skin = key;
+      title.textContent = copy[key].t;
+      desc.textContent = copy[key].d;
+      Array.prototype.forEach.call(document.querySelectorAll(".skin-switch button"), function(b){
+        b.setAttribute("aria-pressed", String(b === btn));
+      });
+    });
+  });
+})();
+</script>
+</body>
+</html>
