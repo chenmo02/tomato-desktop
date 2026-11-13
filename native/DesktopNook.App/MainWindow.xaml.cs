@@ -34,7 +34,7 @@ public partial class MainWindow : Window
     private int _placementVersion;
     private bool _onlineBusy;
     private OnlineRelease? _latestRelease;
-    // 版本号唯一来源是 csproj 的 <Version>：1.2 显示「v1.2」，带修订号时保留三段。
+    // 版本号唯一来源是 csproj 的 <Version>：两段版本显示「v主.次」，带修订号时保留三段。
     internal static string ProductVersion
     {
         get
@@ -45,6 +45,21 @@ public partial class MainWindow : Window
     }
     internal static string CurrentVersionLabel=>"v"+ProductVersion;
     internal string UpdateMenuText=>!OnlineUpdater.Enabled?$"在线更新未启用（当前 {CurrentVersionLabel}）":_latestRelease is null?$"检查在线更新（当前 {CurrentVersionLabel}）…":$"更新到 v{_latestRelease.Version.ToString(3)}（当前 {CurrentVersionLabel}）…";
+    // 侧栏左下角版本号：发现新版本时追加「有更新」并改用强调色；颜色走动态资源，仍跟随主题与系统强调色。
+    internal string VersionBadgeText=>VersionLabel.Text;
+    internal bool VersionBadgeAccent=>VersionLabel.Foreground is SolidColorBrush ink
+        &&Application.Current.FindResource("WinAccent") is SolidColorBrush accent&&ink.Color==accent.Color;
+    private void ApplyVersionBadge(Version? update)
+    {
+        bool has=update is not null;
+        VersionLabel.Text="番茄桌面 · 版本 "+ProductVersion+(has?" · 有更新":"");
+        VersionLabel.FontWeight=has?FontWeights.SemiBold:FontWeights.Normal;
+        VersionLabel.SetResourceReference(TextBlock.ForegroundProperty,has?"WinAccent":"WinTextTertiary");
+        VersionLabel.ToolTip=has?$"发现新版本 v{update!.ToString(3)}，可在「更多」菜单中更新":null;
+    }
+    internal void RefreshVersionBadge()=>ApplyVersionBadge(_latestRelease?.Version);
+    // 尺寸自检用：不访问网络，直接预览「有更新 / 无更新」两种状态。
+    internal void PreviewVersionBadge(Version? update)=>ApplyVersionBadge(update);
     private bool _dragging; private int _interactions; private int _menus; private bool _allowExit; private DateTime _suppressUntil;
     // 双击会产生两次 Up/Click，用同一项的短节流保证只启动一次。
     private string? _lastLaunchId; private DateTime _lastLaunchAt;
@@ -107,8 +122,8 @@ public partial class MainWindow : Window
         DpiChanged+=(_,_)=>{QueueRegionRefresh();QueueDpiLayoutRefresh();};
         ContentRendered+=(_,_)=>SettleBackdropAfterFirstFrame();
         InitializeComponent();
-        // 侧栏版本文字跟随程序集版本，避免 XAML 里的占位值与 csproj 脱节。
-        VersionLabel.Text="番茄桌面 · 版本 "+ProductVersion;
+        // 侧栏版本文字跟随程序集版本与在线检查结果，避免 XAML 里的占位值与 csproj 脱节。
+        RefreshVersionBadge();
         // 主题必须在窗口布局前应用：App.xaml 里的画刷是共享实例，改色后所有控件同步生效。
         Settings=App.Options.ReadSettings();
         ThemeService.Apply(Settings);
@@ -888,7 +903,8 @@ public partial class MainWindow : Window
         {
             var picker=new Microsoft.Win32.OpenFileDialog{Title="选择番茄桌面新版本",Filter="番茄桌面程序或安装包 (*.exe)|*.exe",CheckFileExists=true};if(picker.ShowDialog(this)!=true)return;
             var source=picker.FileName;var target=Environment.ProcessPath!;var candidate=await Task.Run(()=>LocalUpdater.Inspect(source));
-            if(UiDialogs.Show(this,"当前版本："+CurrentVersionLabel+"\n更新到：v"+candidate.Version.ToString(3)+"\n\n程序会在原位置更新，保留分类、收纳内容和设置，完成后自动打开。","更新番茄桌面",MessageBoxButton.OKCancel)!=MessageBoxResult.OK)return;
+            // 统一的更新窗口：版本迁移 + 校验说明 + 「开始更新 / 取消」，不再用通用文本弹窗。
+            if(!UpdateWindow.ConfirmLocal(this,CurrentVersionLabel,"v"+candidate.Version.ToString(3)))return;
             SetStatus("正在准备更新…");var staged=await Task.Run(()=>LocalUpdater.Stage(source,target,Store.DataDirectory,App.IsSandbox?Path.GetDirectoryName(Store.DataDirectory):null));
             var helper=new ProcessStartInfo(staged.Helper){UseShellExecute=false,CreateNoWindow=true};helper.ArgumentList.Add("--apply-update");helper.ArgumentList.Add(staged.Plan);Process.Start(helper);Quit();
         }
@@ -899,36 +915,49 @@ public partial class MainWindow : Window
     {
         if(!OnlineUpdater.Enabled)
         {
-            if(manual){SetStatus("在线更新未启用，可使用“从本地文件更新”");UiDialogs.Show(this,$"当前版本：{CurrentVersionLabel}\n在线更新暂未启用：尚未配置发布仓库地址。\n需要更新时请使用“更多 → 从本地文件更新…”。","在线更新");}
+            if(manual)
+            {
+                SetStatus("在线更新未启用，可使用“从本地文件更新”");
+                UpdateWindow.Notice(this,"在线更新","暂时无法在线更新","尚未配置发布仓库地址。","可以使用「更多 → 从本地文件更新…」。",()=>_ = SelectUpdateAsync());
+            }
             return;
         }
         if(_onlineBusy){if(manual)SetStatus("正在检查或下载更新，请稍候…");return;}
         _onlineBusy=true;if(manual)_interactions++;
         try
         {
-            if(manual)SetStatus($"正在检查更新（当前 {CurrentVersionLabel}）…");
-            using var client=OnlineUpdater.CreateClient();
-            _latestRelease=await OnlineUpdater.CheckAsync(client,System.Reflection.Assembly.GetExecutingAssembly().GetName().Version!);
-            if(_latestRelease is null)
+            var assemblyVersion=System.Reflection.Assembly.GetExecutingAssembly().GetName().Version!;
+            if(!manual)
             {
-                if(manual){SetStatus($"当前 {CurrentVersionLabel} 已是最新版本");UiDialogs.Show(this,$"当前版本：{CurrentVersionLabel}\n已是最新版本。","检查更新");}return;
+                // 后台检查只提示、不弹窗、不自动安装。
+                using var background=OnlineUpdater.CreateClient();
+                _latestRelease=await OnlineUpdater.CheckAsync(background,assemblyVersion);
+                RefreshVersionBadge();
+                if(_latestRelease is not null)SetStatus($"发现新版本 {_latestRelease.Version.ToString(3)}，可在更多菜单中更新");
+                return;
             }
-            SetStatus($"发现新版本 {_latestRelease.Version.ToString(3)}，可在更多菜单中更新");
-            if(!manual)return;
-            string notes=_latestRelease.Notes.Length>600?_latestRelease.Notes[..600]+"…":_latestRelease.Notes;
-            if(UiDialogs.Show(this,$"当前版本：{CurrentVersionLabel}\n更新到：v{_latestRelease.Version.ToString(3)}\n\n{notes}\n\n下载完成后自动重启，分类、收纳内容和设置保留。","发现新版本",MessageBoxButton.OKCancel)!=MessageBoxResult.OK)return;
-            var download=new UpdateDownloadWindow(this,_latestRelease,Store.DataDirectory);
-            if(download.ShowDialog()!=true||download.DownloadedFile is null)return;
+            SetStatus($"正在检查更新（当前 {CurrentVersionLabel}）…");
+            using var client=OnlineUpdater.CreateClient();
+            // 一个窗口走完「检查 → 确认 → 下载 → 校验 → 等待重启」；返回用户确认重启后的下载文件。
+            var result=UpdateWindow.RunOnline(this,CurrentVersionLabel,Store.DataDirectory,
+                ()=>OnlineUpdater.CheckAsync(client,assemblyVersion),SetStatus,()=>_ = SelectUpdateAsync());
+            if(result.Release is not null)_latestRelease=result.Release;
+            RefreshVersionBadge();
+            if(result.File is null)return;
             SetStatus("正在准备更新…");
-            var staged=await Task.Run(()=>LocalUpdater.Stage(download.DownloadedFile,Environment.ProcessPath!,Store.DataDirectory,App.IsSandbox?Path.GetDirectoryName(Store.DataDirectory):null));
+            var staged=await Task.Run(()=>LocalUpdater.Stage(result.File!,Environment.ProcessPath!,Store.DataDirectory,App.IsSandbox?Path.GetDirectoryName(Store.DataDirectory):null));
             using(var plan=System.Text.Json.JsonDocument.Parse(File.ReadAllText(staged.Plan)))
-                if(!plan.RootElement.GetProperty("CandidateHash").GetString()!.Equals(_latestRelease.Sha256,StringComparison.OrdinalIgnoreCase))throw new IOException("更新文件校验失败，请重新下载。");
+                if(!plan.RootElement.GetProperty("CandidateHash").GetString()!.Equals(result.Release!.Sha256,StringComparison.OrdinalIgnoreCase))throw new IOException("更新文件校验失败，请重新下载。");
             var helper=new ProcessStartInfo(staged.Helper){UseShellExecute=false,CreateNoWindow=true};helper.ArgumentList.Add("--apply-update");helper.ArgumentList.Add(staged.Plan);
             if(Process.Start(helper) is null)throw new IOException("无法启动更新助手。");Quit();
         }
         catch(Exception)
         {
-            if(manual){SetStatus("更新检查未完成");UiDialogs.Show(this,$"当前版本：{CurrentVersionLabel}\n暂时无法完成在线更新，请检查网络或系统代理后重试。也可以使用“从本地文件更新”。","在线更新");}
+            if(manual)
+            {
+                SetStatus("更新检查未完成");
+                UpdateWindow.Notice(this,"在线更新","暂时无法完成在线更新","请检查网络或系统代理后重试。","也可以使用「更多 → 从本地文件更新…」。",()=>_ = SelectUpdateAsync(),"关闭","error");
+            }
         }
         finally{_onlineBusy=false;if(manual)_interactions--;}
     }

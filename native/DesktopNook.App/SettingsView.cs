@@ -157,13 +157,13 @@ public partial class MainWindow
         _undoButton = ActionButton("撤销", OnUndoButton, 116);
         data.Add(SettingRow("撤销上一步", "也可在任意界面按 Ctrl+Z；最近 20 步可撤销", _undoButton));
         data.Add(SettingRow("最近操作", "保留 30 天文字日志，只记录在本地", ActionButton("查看记录", OnShowLog)));
-        data.Add(SettingRow("数据目录", "所有文件都在本机，不上传、不联网", ActionButton("打开目录", OnOpenData)));
+        data.Add(SettingRow("数据目录", "收纳文件保存在数据目录，不上传", ActionButton("打开目录", OnOpenData)));
         data.Add(SettingRow("失效入口", "检测快捷方式目标是否已丢失，失效图标会标灰", ActionButton("检查并清理", OnCleanBroken)));
         SettingsGroups.Children.Add(SettingsSection("数据与备份", data.ToArray()));
 
         var about = new List<FrameworkElement>
         {
-            SettingRow("番茄桌面 " + CurrentVersionLabel, "纯本地运行；在线更新当前停用，可用「更多 → 从本地文件更新」", ActionButton("创建入口", OnCreateShortcuts)),
+            SettingRow("番茄桌面 " + CurrentVersionLabel, "分类、收纳内容与设置保留在原位；可在「更多」检查在线更新或使用本地文件更新", ActionButton("创建入口", OnCreateShortcuts)),
             SettingRow("退出并结束进程", "结束后台驻留，下次需手动启动", ActionButton("退出", (_,_) => Quit(), 116))
         };
         SettingsGroups.Children.Add(SettingsSection("关于", about.ToArray()));

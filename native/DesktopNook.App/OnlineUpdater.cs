@@ -9,11 +9,11 @@ internal sealed record OnlineRelease(Version Version,Uri Download,long Size,stri
 
 internal static class OnlineUpdater
 {
-    // 在线更新发布仓库（"owner/repo"）。当前留空 = 停用：程序不会发起任何检查请求，
-    // 状态栏也不会再提示旧仓库的新版本。拿到用户指定的仓库地址后，只需把 Repository
-    // 填成新的 "owner/repo"（若资产名不同再改 AssetName），Enabled 自动变为 true，
-    // 启动后台检查与“更多 → 检查在线更新”随即恢复，其余代码无需改动。
-    internal const string Repository="";
+    // 在线更新发布仓库（"owner/repo"）。已指向正式发布仓库，Enabled 为 true：
+    // 启动后台检查与“更多 → 检查在线更新”均启用。留空即停用，程序不会发起任何请求。
+    // 发布记录必须提供 DesktopNook-Setup.exe、有效的 size 与 sha256 digest，
+    // 且下载地址落在本仓库的 /releases/download/ 路径下，否则 Parse / TrustedUrl 会拒绝更新。
+    internal const string Repository="chenmo02/tomato-desktop";
     internal const string AssetName="DesktopNook-Setup.exe";
     internal static bool Enabled=>!string.IsNullOrWhiteSpace(Repository);
     internal static readonly Uri Latest=new($"https://api.github.com/repos/{Repository}/releases/latest");

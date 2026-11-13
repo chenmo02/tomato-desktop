@@ -102,11 +102,45 @@ internal static class SizingVerification
             }
             finally{mouse_event(4,0,0,0,UIntPtr.Zero);SetCursorPos(originalCursor.X,originalCursor.Y);}
             Check(window.UpdateMenuText.Contains(MainWindow.CurrentVersionLabel),"更新入口显示当前版本");
+            // 线上正式版与当前版本相同时不会触发更新态，用预览入口直接渲染两态并留图核对。
+            window.PreviewVersionBadge(new Version(9,9,9));await Layout();
+            Check(window.VersionBadgeText.Contains("有更新"),"侧栏版本号在有更新时追加标记");
+            Check(window.VersionBadgeAccent,"侧栏版本号在有更新时改用强调色");
+            Snapshot("version-badge-update");
+            window.PreviewVersionBadge(null);await Layout();
+            Check(!window.VersionBadgeText.Contains("有更新")&&!window.VersionBadgeAccent,"无更新时侧栏版本号恢复常规样式");
             var sampleRepo=string.IsNullOrWhiteSpace(OnlineUpdater.Repository)?"example/desktop-nook-releases":OnlineUpdater.Repository;
-            var download=new UpdateDownloadWindow(window,new OnlineRelease(new Version(9,9,9),new Uri("https://github.com/"+sampleRepo+"/releases/download/v9.9.9/"+OnlineUpdater.AssetName),1,new string('0',64),"test"),root);
+            var download=new UpdateWindow(window);
+            download.PreviewDownload(MainWindow.CurrentVersionLabel,new OnlineRelease(new Version(9,9,9),new Uri("https://github.com/"+sampleRepo+"/releases/download/v9.9.9/"+OnlineUpdater.AssetName),1,new string('0',64),"test"));
             string Text(DependencyObject parent){var result=parent is System.Windows.Controls.TextBlock text?text.Text:"";foreach(var child in LogicalTreeHelper.GetChildren(parent).OfType<DependencyObject>())result+=" "+Text(child);return result;}
-            download.Measure(new Size(430,600));download.Arrange(new Rect(0,0,430,600));
-            Check(Text(download).Contains(MainWindow.CurrentVersionLabel)&&Text(download).Contains("v9.9.9"),"下载弹窗显示当前与目标版本");
+            download.Measure(new Size(480,600));download.Arrange(new Rect(0,0,480,600));
+            Check(Text(download).Contains(MainWindow.CurrentVersionLabel)&&Text(download).Contains("v9.9.9"),"更新窗口显示当前与目标版本");
+            bool HasStateIcon(DependencyObject parent)
+            {
+                if(parent is System.Windows.Controls.Border box&&box.Width==38&&box.Height==38&&box.CornerRadius.TopLeft>=18)return true;
+                foreach(var child in LogicalTreeHelper.GetChildren(parent).OfType<DependencyObject>())if(HasStateIcon(child))return true;
+                return false;
+            }
+            Check(!HasStateIcon(download),"更新窗口标题区不再使用圆形状态图标");
+            Check(Math.Abs(download.HeaderInset-download.ContentInset)<0.01,"更新窗口标题区与内容卡共用左边缘");
+            // 把统一更新窗口的关键状态渲染成预览图，便于人工核对与设计稿的一致性。
+            async Task Capture(UpdateWindow target,string name)
+            {
+                target.Show();await window.Dispatcher.InvokeAsync(()=>{},DispatcherPriority.ContextIdle);target.UpdateLayout();
+                var bitmap=new RenderTargetBitmap((int)Math.Ceiling(target.ActualWidth),(int)Math.Ceiling(target.ActualHeight),96,96,PixelFormats.Pbgra32);
+                bitmap.Render(target);
+                var encoder=new PngBitmapEncoder();encoder.Frames.Add(BitmapFrame.Create(bitmap));
+                using(var file=File.Create(Path.Combine(root,name)))encoder.Save(file);
+                target.Close();
+            }
+            var checking=new UpdateWindow(window);checking.PreviewChecking();
+            await Capture(checking,"update-window-checking-preview.png");
+            await Capture(download,"update-window-download-preview.png");
+            var release=new OnlineRelease(new Version(9,9,9),new Uri("https://github.com/"+sampleRepo+"/releases/download/v9.9.9/"+OnlineUpdater.AssetName),1,new string('0',64),"test");
+            var available=new UpdateWindow(window);available.PreviewAvailable(MainWindow.CurrentVersionLabel,release);
+            await Capture(available,"update-window-available-preview.png");
+            var confirm=new UpdateWindow(window);confirm.ShowLocal(MainWindow.CurrentVersionLabel,"v9.9.9");
+            await Capture(confirm,"update-window-confirm-preview.png");
             window.SelectWindowSize(reset:true);await Layout();Check(!window.SizePreference.Free&&window.IconColumns==8,"一键恢复默认尺寸及八列布局");
             // 网格内拖动重排：调整顺序后图标仍紧凑排成网格，第一行始终八列。
             var ids=App.Store.State.Items.Select(i=>i.Id).ToList();

@@ -4,9 +4,9 @@
 
 **只收纳你选中的桌面图标，其余照旧留在桌面。** 番茄桌面是一个运行于 Windows 的桌面收纳工具：把快捷方式、文件或文件夹「喂给番茄」，之后从任务栏上的同一个入口按分类打开；需要时，一键把项目移回桌面。
 
-![版本](https://img.shields.io/badge/version-1.2-blue) ![平台](https://img.shields.io/badge/platform-Windows%2010%2F11%20x64-0078D6?logo=windows) ![框架](https://img.shields.io/badge/.NET-10-512BD4?logo=dotnet) ![许可证](https://img.shields.io/badge/license-not%20specified-lightgrey)
+![版本](https://img.shields.io/badge/version-1.3-blue) ![平台](https://img.shields.io/badge/platform-Windows%2010%2F11%20x64-0078D6?logo=windows) ![框架](https://img.shields.io/badge/.NET-10-512BD4?logo=dotnet) ![许可证](https://img.shields.io/badge/license-not%20specified-lightgrey)
 
-[Releases](https://github.com/chenmo02/tomato-desktop/releases) · [使用说明](docs/使用说明.md) · [架构与数据](docs/架构与数据.md) · [开发与构建](docs/开发与构建.md) · [反馈问题](https://github.com/chenmo02/tomato-desktop/issues)
+[Releases](https://github.com/chenmo02/tomato-desktop/releases) · [使用说明](docs/使用说明.md) · [架构与数据](docs/架构与数据.md) · [开发与构建](docs/开发与构建.md) · [打包与发布](docs/打包与发布.md) · [反馈问题](https://github.com/chenmo02/tomato-desktop/issues)
 
 ---
 
@@ -31,7 +31,7 @@
 - **可撤销与可恢复**：收纳、移回、分类与排序改动进入最近 20 步撤销栈，操作日志保留 30 天；启动时校验失效快捷方式，可在设置里批量清理。
 - **自动化与偏好**：全局热键 `Ctrl+Alt+T`、可选开机自启、自动收纳新桌面图标（面板可见时每 15 秒扫描、收起后降频到 60 秒并在恢复显示时立即补扫，默认关闭）、失焦自动收起（默认关闭）。
 - **后台资源控制**：图标解码线程按需启动、空闲 20 秒自动退出；图标位图按 48 MB 预算做 LRU 淘汰；面板收起时释放玻璃壁纸位图、模糊背景层与「全部图标」页视觉树，恢复显示时按需重建，收纳数据、分类与设置不受影响。
-- **本地更新**：「更多 → 从本地文件更新…」校验版本、产品标识与文件后在原位置替换并重启，保留分类、收纳内容和设置。
+- **统一更新窗口**：本地文件更新与在线更新共用一个 480px 窗口，按状态展示版本迁移、下载进度阶段、数据安全声明与失败重试；校验版本、产品标识与文件后在原位置替换并重启，保留分类、收纳内容和设置。
 
 完整交互说明见 [使用说明](docs/使用说明.md)。
 
@@ -101,7 +101,7 @@ dotnet run --project native/DesktopNook.Tests -c Release -- native/test-results/
 makensis /V2 native/scripts/Installer.nsi   # 需要 Unicode NSIS，输出 native/artifacts/DesktopNook-Setup.exe
 ```
 
-完整的测试、安装器与发行步骤见 [开发与构建](docs/开发与构建.md)。原生 UI 自检会短暂操控鼠标，必须在专用隔离目录中运行。
+完整的测试、安装器与发行步骤见 [开发与构建](docs/开发与构建.md)；从版本号 bump 到发布 Release 的可执行清单见 [打包与发布](docs/打包与发布.md)。原生 UI 自检会短暂操控鼠标，必须在专用隔离目录中运行。
 
 ## 数据与备份
 
@@ -120,12 +120,13 @@ makensis /V2 native/scripts/Installer.nsi   # 需要 Unicode NSIS，输出 nativ
 | --- | --- |
 | [使用说明](docs/使用说明.md) | 界面、收纳与移回、设置项、窗口大小、更新与卸载 |
 | [架构与数据](docs/架构与数据.md) | 模块职责、数据目录、偏好存储、更新与验证范围 |
-| [开发与构建](docs/开发与构建.md) | 编译、沙箱调试、测试、安装包与发行流程 |
+| [开发与构建](docs/开发与构建.md) | 编译、沙箱调试、测试、安装包与全部自检入口 |
+| [打包与发布](docs/打包与发布.md) | 版本同步、打包、Release 发布、客户端校验规则与故障排查 |
 | [原生源码说明](native/README.md) | `native/` 目录入口 |
 
 ```text
 README.md
-docs/                     使用说明 · 架构与数据 · 开发与构建
+docs/                     使用说明 · 架构与数据 · 开发与构建 · 打包与发布
 native/
   DesktopNook.App/        WPF 界面、Shell 集成、皮肤与背板、窗口、更新
   DesktopNook.Core/       收纳迁移、状态模型、恢复清单与文件流
@@ -139,8 +140,8 @@ native/
 
 ## 项目状态与已知限制
 
-- 当前源码版本 **1.2**，基于 WPF / .NET 10（`net10.0-windows`），面向 Windows 10 / 11 x64。
-- **在线更新当前停用**：`native/DesktopNook.App/OnlineUpdater.cs` 的 `Repository` 为空，启动后不会发起任何检查请求。待本仓库开始发布后，把它设为 `chenmo02/tomato-desktop`（并确保发布资产名为 `DesktopNook-Setup.exe`）即可恢复后台检查与手动检查；恢复后下载需能访问 GitHub。
+- 当前源码版本 **1.3**，基于 WPF / .NET 10（`net10.0-windows`），面向 Windows 10 / 11 x64。
+- **在线更新已启用**：`OnlineUpdater.Repository` 指向 `chenmo02/tomato-desktop`，启动后台检查与「更多 → 检查在线更新」均可用；检查与下载需能访问 GitHub。发布资产必须为 `DesktopNook-Setup.exe`，且 GitHub 返回的 `digest`（`sha256:…`）与 `size` 有效，下载地址须落在该仓库的 `/releases/download/` 路径下，否则检查会拒绝更新而不下载。
 - 公共桌面快捷方式与被占用文件受 Windows 权限限制，失败时保留原项目并提示；符号链接、目录联接及未落地的云占位内容暂不按普通文件夹收纳。
 - 图标清晰度受原应用资源限制；跨屏 DPI 切换已由 `--dpi-self-test` 覆盖（窗口圆角区域、内容层与壁纸对齐会随 DPI 重算），但不同显示器缩放组合仍未逐一实机验收。
 - 玻璃拟态皮肤依赖 Windows 11 22621+ 且系统「透明效果」开启，不满足时自动回退到按窗口位置对齐的模糊壁纸层；壁纸对齐按整个虚拟屏幕的物理像素计算，扩展屏摆在左侧（负坐标）时同样有效。
