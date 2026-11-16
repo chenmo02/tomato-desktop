@@ -82,21 +82,8 @@ public partial class MainWindow
         _sizePreference=_sizePreference.Validated();
         Width=PreferredWindowSize.Width;Height=PreferredWindowSize.Height;UpdateSizingLayout();SaveSizePreference();Place();
     }
-    internal MenuItem WindowSizeMenu()
-    {
-        var menu=new MenuItem{Header="窗口大小"};
-        foreach(double zoom in WindowSizePreference.Presets)
-        {
-            var item=Menu($"{zoom*100:0}%"+(zoom==1?"（默认）":""),()=>SelectWindowSize(zoom));
-            item.IsCheckable=true;item.IsChecked=!_sizePreference.Free&&_sizePreference.Zoom==zoom;menu.Items.Add(item);
-        }
-        menu.Items.Add(new Separator());
-        var free=Menu("自由调整",()=>SelectWindowSize());free.IsCheckable=true;free.IsChecked=_sizePreference.Free;menu.Items.Add(free);
-        var aspect=Menu("锁定宽高比",()=>SelectWindowSize(locked:!_sizePreference.Locked),_sizePreference.Free);
-        aspect.IsCheckable=true;aspect.IsChecked=_sizePreference.Locked;menu.Items.Add(aspect);
-        menu.Items.Add(new Separator());menu.Items.Add(Menu("恢复默认大小",()=>SelectWindowSize(reset:true)));
-        menu.Items.Add(new Separator());menu.Items.Add(Menu("贴回任务栏",ResetWindowPlacement,_manualPlacement));return menu;
-    }
+    // 尺寸预设 / 自由调整 / 锁定宽高比 / 恢复默认 / 贴回任务栏的界面已迁入
+    // 「设置 → 窗口调整」；这里只保留被设置页与自检共用的尺寸逻辑。
     internal void ResetWindowPlacement()
     {
         _manualPlacement=false;_manualLeft=0;_manualTop=0;SaveWindowPosition();Place();

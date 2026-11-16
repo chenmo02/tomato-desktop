@@ -6,7 +6,7 @@ using DesktopNook.Core;
 
 namespace DesktopNook.App;
 
-// 独立设置页：外观、行为、数据备份与关于。所有颜色取自 Application.Resources，
+// 独立设置页：外观、窗口调整、行为、数据备份与关于。所有颜色取自 Application.Resources，
 // 主题切换时同一批画刷实例会同步变色，无需重建设置页。
 public partial class MainWindow
 {
@@ -17,9 +17,9 @@ public partial class MainWindow
     private bool _settingsVisible;
     private bool _settingsLoaded;
     private bool _suppressSettings;
-    private CheckBox? _accentCheck, _infoCheck, _startupCheck, _hotKeyCheck, _autoCollectCheck, _closeCheck, _autoHideCheck, _systemItemsCheck;
-    private Button? _themeButton, _skinButton, _undoButton;
-    private TextBlock? _themeLabel, _skinLabel;
+    private CheckBox? _accentCheck, _infoCheck, _startupCheck, _hotKeyCheck, _autoCollectCheck, _closeCheck, _autoHideCheck, _systemItemsCheck, _topmostCheck, _aspectCheck;
+    private Button? _themeButton, _skinButton, _sizeButton, _undoButton, _placementButton;
+    private TextBlock? _themeLabel, _skinLabel, _sizeLabel;
     // 记录上一次已应用到「全部图标」列表的偏好，避免每次主题/开关变更都重建列表。
     private bool _systemItemsApplied;
 
@@ -125,11 +125,30 @@ public partial class MainWindow
         return button;
     }
 
+    // 窗口大小与主题/皮肤共用 WinUI 下拉选择器，宽度留出「100%（默认）」与箭头。
+    private Button WindowSizeCombo()
+    {
+        var button = new Button { Style = Sty("WinSettingsCombo"), FontSize = 12 };
+        var panel = new Grid { Width = 132 };
+        panel.ColumnDefinitions.Add(new() { Width = new GridLength(1, GridUnitType.Star) });
+        panel.ColumnDefinitions.Add(new() { Width = GridLength.Auto });
+        _sizeLabel = new TextBlock { Text = "100%（默认）", FontSize = 12, VerticalAlignment = VerticalAlignment.Center, HorizontalAlignment = HorizontalAlignment.Left };
+        Bind(_sizeLabel, TextBlock.ForegroundProperty, "WinText");
+        var chevron = new ContentControl { Style = Sty("WinGlyphChevronDown"), VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(10, 0, 0, 0) };
+        panel.Children.Add(_sizeLabel);
+        Grid.SetColumn(chevron, 1);
+        panel.Children.Add(chevron);
+        button.Content = panel;
+        button.Click += OnWindowSizePick;
+        return button;
+    }
+
     private void BuildSettings()
     {
         SettingsGroups.Children.Clear();
         _themeButton = ThemeCombo();
         _skinButton = SkinCombo();
+        _sizeButton = WindowSizeCombo();
         var appearance = new List<FrameworkElement>
         {
             SettingRow("皮肤", "原生系统贴近 Win11 控件；玻璃拟态使用半透明面板、模糊背景与柔和光晕", _skinButton),
@@ -138,6 +157,20 @@ public partial class MainWindow
         _accentCheck = SettingCheckBox(appearance, "强调色跟随系统", "主操作按钮、链接与聚焦下划线使用系统强调色");
         _infoCheck = SettingCheckBox(appearance, "显示顶部提示条", "关闭后不再显示操作说明，可在设置里重新打开");
         SettingsGroups.Children.Add(SettingsSection("外观", appearance.ToArray()));
+
+        // 原「更多 → 窗口大小」的全部能力搬到这里，并新增置顶开关。
+        var window = new List<FrameworkElement>
+        {
+            SettingRow("窗口大小", "80% / 100% / 125% / 150% 四档预设，或自由拖动窗口边缘", _sizeButton)
+        };
+        _aspectCheck = new CheckBox { Style = Sty("WinToggleSwitch") };
+        _aspectCheck.Checked += OnAspectLockChanged; _aspectCheck.Unchecked += OnAspectLockChanged;
+        window.Add(SettingRow("锁定宽高比", "自由调整时按设计稿比例缩放，仅在「自由调整」下可用", _aspectCheck));
+        window.Add(SettingRow("恢复默认大小", "回到 100% 预设，清除自由调整时记下的宽高", ActionButton("恢复默认", OnRestoreSize)));
+        _placementButton = ActionButton("贴回任务栏", OnResetPlacement);
+        window.Add(SettingRow("贴回任务栏", "手动拖动过面板后，重新贴着任务栏显示", _placementButton));
+        _topmostCheck = SettingCheckBox(window, "窗口置顶", "开启后面板始终显示在其他窗口之上；关闭后按普通窗口层级显示");
+        SettingsGroups.Children.Add(SettingsSection("窗口调整", window.ToArray()));
 
         var behavior = new List<FrameworkElement>();
         _startupCheck = SettingCheckBox(behavior, "开机自启", "登录 Windows 后自动在任务栏待命");
@@ -189,7 +222,8 @@ public partial class MainWindow
             HotKey = _hotKeyCheck?.IsChecked == true,
             AutoCollect = _autoCollectCheck?.IsChecked == true,
             AutoHideOnDeactivate = _autoHideCheck?.IsChecked == true,
-            ShowSystemItems = _systemItemsCheck?.IsChecked == true
+            ShowSystemItems = _systemItemsCheck?.IsChecked == true,
+            AlwaysOnTop = _topmostCheck?.IsChecked == true
         };
         App.Options.CloseEndsProcess = _closeCheck?.IsChecked == true;
         if (ReferenceEquals(sender, _startupCheck)) App.Options.SetEnabled(_startupCheck!.IsChecked == true);
@@ -220,6 +254,48 @@ public partial class MainWindow
         Popup((FrameworkElement)sender, options);
     }
 
+    // 窗口调整分区的控件不写进 AppSettings：尺寸沿用 WindowSizePreference 的独立持久化，
+    // 置顶开关才属于 AppSettings，因此只有它由 OnSettingChanged 统一处理。
+    private void OnWindowSizePick(object sender, RoutedEventArgs e)
+    {
+        var options = new List<object>();
+        foreach(var zoom in WindowSizePreference.Presets)
+        {
+            var item = Menu($"{zoom*100:0}%"+(zoom==1?"（默认）":""),()=>ApplyWindowSizeChoice(zoom));
+            item.IsCheckable=true;item.IsChecked=!SizePreference.Free&&SizePreference.Zoom==zoom;
+            options.Add(item);
+        }
+        var free=Menu("自由调整",()=>ApplyWindowSizeChoice(null));
+        free.IsCheckable=true;free.IsChecked=SizePreference.Free;
+        options.Add(free);
+        Popup((FrameworkElement)sender,options);
+    }
+    private void ApplyWindowSizeChoice(double? zoom)
+    {
+        SelectWindowSize(zoom);
+        RefreshSettingsControls();
+        SetStatus(zoom is double value?$"窗口大小已设为 {value*100:0}%":"已切换为自由调整，可拖动窗口边缘改变大小");
+    }
+    private void OnAspectLockChanged(object sender, RoutedEventArgs e)
+    {
+        if(!_settingsLoaded||_suppressSettings)return;
+        SelectWindowSize(locked:!SizePreference.Locked);
+        RefreshSettingsControls();
+        SetStatus(SizePreference.Locked?"已锁定窗口宽高比":"已取消锁定宽高比");
+    }
+    private void OnRestoreSize(object sender, RoutedEventArgs e)
+    {
+        SelectWindowSize(reset:true);
+        RefreshSettingsControls();
+        SetStatus("已恢复默认窗口大小");
+    }
+    private void OnResetPlacement(object sender, RoutedEventArgs e)
+    {
+        ResetWindowPlacement();
+        RefreshSettingsControls();
+        SetStatus("已贴回任务栏");
+    }
+
     private void RefreshSettingsControls()
     {
         if (_accentCheck is null) return;
@@ -234,6 +310,12 @@ public partial class MainWindow
             _closeCheck!.IsChecked = App.Options.CloseEndsProcess;
             _startupCheck!.IsChecked = App.Options.Enabled;
             _systemItemsCheck!.IsChecked = Settings.ShowSystemItems;
+            _topmostCheck!.IsChecked = Settings.AlwaysOnTop;
+            _aspectCheck!.IsChecked = SizePreference.Locked;
+            _aspectCheck.IsEnabled = SizePreference.Free;
+            _aspectCheck.ToolTip = _aspectCheck.IsEnabled ? null : "先在「窗口大小」里选择「自由调整」";
+            if (_sizeLabel is not null) _sizeLabel.Text = SizePreference.Free ? "自由调整" : $"{SizePreference.Zoom*100:0}%" + (SizePreference.Zoom==1?"（默认）":"");
+            if (_placementButton is not null) _placementButton.IsEnabled = _manualPlacement;
             if (_themeLabel is not null) _themeLabel.Text = Settings.ThemeMode switch { "light" => "浅色", "dark" => "深色", _ => "跟随系统" };
             if (_skinLabel is not null) _skinLabel.Text = SkinService.IsGlass(Settings) ? "玻璃拟态" : "原生系统";
             if (_skinButton is not null) _skinButton.ToolTip = BackdropService.Status;
@@ -249,6 +331,7 @@ public partial class MainWindow
     {
         App.Options.WriteSettings(Settings);
         ThemeService.Apply(Settings);
+        ApplyTopmost();
         // 先切 DWM 系统背板（Acrylic / Mica），再让自绘背景层按新状态决定显隐。
         ApplyBackdrop();
         // 皮肤形态（圆角、光晕、背景层）同步生效；壁纸解码仍交给后台刷新路径。
@@ -336,11 +419,7 @@ public partial class MainWindow
         finally { _interactions--; }
     }
 
-    private void OnOpenData(object sender, RoutedEventArgs e)
-    {
-        try { System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("explorer.exe", Store.DataDirectory) { UseShellExecute = true }); }
-        catch (Exception ex) { ShowFailure(ex); }
-    }
+    private void OnOpenData(object sender, RoutedEventArgs e)=>OpenExplorer(Store.DataDirectory);
 
     private void OnCreateShortcuts(object sender, RoutedEventArgs e) => Run(() => ShortcutInstaller.InstallAll(), "已创建桌面与开始菜单入口");
 

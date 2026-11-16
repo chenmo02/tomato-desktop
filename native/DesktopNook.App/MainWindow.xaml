@@ -14,7 +14,7 @@
     <!-- 标题栏：左侧品牌，右侧 46×48 标准 caption 按钮 -->
     <Border Grid.Row="0" BorderBrush="{DynamicResource WinStrokeSoft}" BorderThickness="0,0,0,1">
      <Grid x:Name="TitleBar" Margin="16,0,0,0" Background="Transparent"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-      <StackPanel Orientation="Horizontal" VerticalAlignment="Center" ToolTip="按住此处可拖动面板；贴回任务栏请在“更多 → 窗口大小”中操作">
+      <StackPanel Orientation="Horizontal" VerticalAlignment="Center" ToolTip="按住此处可拖动面板；贴回任务栏请在“设置 → 窗口调整”中操作">
        <!-- 品牌图标使用应用自己的番茄图标；限制解码宽度，避免 1254px 原图占用大块内存 -->
        <Image Width="18" Height="18" Margin="0,0,8,0" VerticalAlignment="Center" RenderOptions.BitmapScalingMode="HighQuality">
         <Image.Source><BitmapImage UriSource="Assets/AppIcon.png" DecodePixelWidth="36"/></Image.Source>
@@ -140,7 +140,7 @@
        <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
        <StackPanel Grid.Row="0" Margin="0,0,0,18">
         <TextBlock Text="设置" FontSize="28" FontWeight="Light" Foreground="{DynamicResource WinText}"/>
-        <TextBlock Text="外观、行为、数据与本地备份" FontSize="12" Foreground="{DynamicResource WinTextSecondary}" Margin="0,4,0,0"/>
+        <TextBlock Text="外观、窗口调整、行为、数据与本地备份" FontSize="12" Foreground="{DynamicResource WinTextSecondary}" Margin="0,4,0,0"/>
        </StackPanel>
        <ScrollViewer Grid.Row="1" Style="{StaticResource WinMenuScrollViewer}" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" CanContentScroll="False" Padding="0,0,12,28">
         <StackPanel x:Name="SettingsGroups" Orientation="Vertical"/>

@@ -1,6 +1,7 @@
 using System.IO;
 using System.Text.Json;
 using System.Windows;
+using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
@@ -47,6 +48,9 @@ internal static class SizingVerification
                 using(var registry=Registry.CurrentUser.CreateSubKey(key+@"\Settings"))registry.SetValue("WindowSize","broken json");
                 Check(settings.ReadWindowSize()==new WindowSizePreference(),"损坏偏好安全恢复默认");
                 Check(new WindowSizePreference{Width=double.NaN,Height=-20,Zoom=9}.Validated().Width==WindowSizePreference.BaseWidth,"非法尺寸数值校验");
+                settings.WriteSettings(new AppSettings{AlwaysOnTop=false});
+                Check(!settings.ReadSettings().AlwaysOnTop,"置顶开关关闭时随偏好持久化");
+                Check(new AppSettings().AlwaysOnTop,"置顶开关默认保持原有常驻行为");
             }
             finally{Registry.CurrentUser.DeleteSubKeyTree(key,false);}
             for(int n=1;n<=12;n++){var file=Path.Combine(App.Store.DesktopRoots[0],$"示例应用 {n}.url");File.WriteAllText(file,"[InternetShortcut]\r\nURL=https://example.invalid/\r\n");App.Store.Collect(file,"office");}window.Render();await Layout();
@@ -101,6 +105,9 @@ internal static class SizingVerification
                 Check(Math.Abs(App.Options.ReadWindowSize().Width-window.ActualWidth)<2,"真实拖动尺寸持久保存");Snapshot("mouse-resize");
             }
             finally{mouse_event(4,0,0,0,UIntPtr.Zero);SetCursorPos(originalCursor.X,originalCursor.Y);}
+            var more=window.MoreMenuEntries();
+            Check(!more.OfType<MenuItem>().Any(m=>m.Header is string h&&(h=="文件管理"||h=="窗口大小")),"更多菜单已移除文件管理与窗口大小");
+            Check(more.OfType<MenuItem>().Any(m=>m.Header is string h&&h=="打开设置"),"更多菜单仍保留设置入口");
             Check(window.UpdateMenuText.Contains(MainWindow.CurrentVersionLabel),"更新入口显示当前版本");
             // 线上正式版与当前版本相同时不会触发更新态，用预览入口直接渲染两态并留图核对。
             window.PreviewVersionBadge(new Version(9,9,9));await Layout();
@@ -142,6 +149,15 @@ internal static class SizingVerification
             var confirm=new UpdateWindow(window);confirm.ShowLocal(MainWindow.CurrentVersionLabel,"v9.9.9");
             await Capture(confirm,"update-window-confirm-preview.png");
             window.SelectWindowSize(reset:true);await Layout();Check(!window.SizePreference.Free&&window.IconColumns==8,"一键恢复默认尺寸及八列布局");
+            window.ShowSettingsView();await Layout();
+            var settingsText=Find<TextBlock>(window).Select(t=>t.Text).ToList();
+            Check(new[]{"窗口调整","窗口大小","锁定宽高比","恢复默认大小","贴回任务栏","窗口置顶"}.All(label=>settingsText.Contains(label)),"设置页窗口调整分组包含尺寸、置顶与贴回入口");
+            // 分组下半部分默认需要滚动，这里滚到分组顶部留图，便于核对置顶开关与贴回按钮。
+            var windowSection=window.SettingsGroups.Children.OfType<StackPanel>().Skip(1).First();
+            var scroller=Find<ScrollViewer>(window.SettingsSurface).First();
+            scroller.ScrollToVerticalOffset(Math.Max(0,windowSection.TransformToAncestor(scroller).Transform(new Point(0,0)).Y+scroller.VerticalOffset-8));
+            await Layout();Snapshot("settings-window-group");
+            window.ShowIconsView();await Layout();
             // 网格内拖动重排：调整顺序后图标仍紧凑排成网格，第一行始终八列。
             var ids=App.Store.State.Items.Select(i=>i.Id).ToList();
             App.Store.MoveItemToIndex(ids[0],8);window.Render();await Layout();

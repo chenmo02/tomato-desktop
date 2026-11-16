@@ -18,6 +18,8 @@ internal sealed record AppSettings
     public bool AutoHideOnDeactivate {get;init;}
     // 「全部图标」页是否列出 Windows 工具、命令行、诊断组件等系统项目；入口在「设置 → 行为」。
     public bool ShowSystemItems {get;init;}
+    // 窗口是否始终置顶：默认沿用原有常驻行为，开关在「设置 → 窗口调整」。
+    public bool AlwaysOnTop {get;init;}=true;
     public string ThemeMode => Theme is "light" or "dark"?Theme:"system";
 }
 internal sealed class StartupOptions(string runKey = @"Software\Microsoft\Windows\CurrentVersion\Run",string settingsKey = @"Software\DesktopNook\Settings")

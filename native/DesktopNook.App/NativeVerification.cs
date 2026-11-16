@@ -474,13 +474,15 @@ internal static class NativeVerification
             checks.Add("Zoomed focus-state search box rendered for visual review");
             window.IconSearch.MoveFocus(new System.Windows.Input.TraversalRequest(System.Windows.Input.FocusNavigationDirection.Next));
 
-            // 设置页专项：渲染一次，确认外观/行为/数据/关于四组控件都能实例化。
+            // 设置页专项：渲染一次，确认外观/窗口调整/行为/数据/关于五组控件都能实例化。
             window.ShowSettingsView();
             await window.Dispatcher.InvokeAsync(()=>{},DispatcherPriority.ContextIdle);
             window.UpdateLayout();
             // 重设计后的结构断言：外置标题 + 圆角卡片 + 等高行 + 内缩分隔线 + ToggleSwitch。
             var sections=window.SettingsGroups.Children.OfType<StackPanel>().ToList();
-            if(sections.Count!=4)throw new Exception("设置页分组数量异常："+sections.Count);
+            if(sections.Count!=5)throw new Exception("设置页分组数量异常："+sections.Count);
+            var sectionTitles=sections.Select(s=>s.Children.OfType<System.Windows.Controls.TextBlock>().FirstOrDefault()?.Text).ToList();
+            if(!sectionTitles.Contains("窗口调整"))throw new Exception("设置页缺少「窗口调整」分组："+string.Join("/",sectionTitles));
             var cards=sections.Select(s=>s.Children.OfType<Border>().FirstOrDefault()).ToList();
             if(cards.Any(c=>c is null||c.CornerRadius.TopLeft<6||c.Child is not StackPanel))throw new Exception("设置卡片未按 WinUI 圆角规范创建。");
             var firstRows=(StackPanel)cards[0]!.Child!;
@@ -501,8 +503,15 @@ internal static class NativeVerification
                 }
             }
             CountToggles(window.SettingsGroups);
-            if(toggles!=8)throw new Exception("ToggleSwitch 数量异常："+toggles);
-            checks.Add("Settings page uses four rounded cards, 64px separated rows and eight WinUI toggle switches");
+            // 原有 8 个（外观 2 / 行为 5 / 关闭行为 1）+ 窗口调整 2 个（锁定宽高比、窗口置顶）。
+            if(toggles!=10)throw new Exception("ToggleSwitch 数量异常："+toggles);
+            checks.Add("Settings page uses five rounded cards, 64px separated rows and ten WinUI toggle switches");
+            if(!window.Settings.AlwaysOnTop||!window.Topmost)throw new Exception("窗口置顶应默认开启并与窗口层级一致。");
+            window.Settings=window.Settings with{AlwaysOnTop=false};window.ApplyTopmost();
+            if(window.Topmost)throw new Exception("关闭置顶后窗口层级未同步。");
+            window.Settings=window.Settings with{AlwaysOnTop=true};window.ApplyTopmost();
+            if(!window.Topmost)throw new Exception("重新开启置顶后窗口层级未同步。");
+            checks.Add("Always-on-top toggle follows AppSettings and applies to the live window");
             if(window.Settings.AutoHideOnDeactivate)throw new Exception("失焦自动收起应默认关闭，面板必须能手动保持显示。");
             checks.Add("Auto-hide on deactivation is off by default; the panel only closes manually");
             if(window.SettingsNavButton.Uid!="selected")throw new Exception("设置页未在侧栏显示选中态。");
@@ -511,7 +520,7 @@ internal static class NativeVerification
             settingsBitmap.Render(window);
             var settingsPng=new PngBitmapEncoder();settingsPng.Frames.Add(BitmapFrame.Create(settingsBitmap));
             using(var file=File.Create(Path.Combine(root,"settings-preview.png")))settingsPng.Save(file);
-            checks.Add("Settings view renders with appearance, behavior, data and about groups");
+            checks.Add("Settings view renders with appearance, window sizing, behavior, data and about groups");
             window.ShowIconsView();
             await window.Dispatcher.InvokeAsync(()=>{},DispatcherPriority.ContextIdle);
 

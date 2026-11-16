@@ -127,6 +127,8 @@ public partial class MainWindow : Window
         // 主题必须在窗口布局前应用：App.xaml 里的画刷是共享实例，改色后所有控件同步生效。
         Settings=App.Options.ReadSettings();
         ThemeService.Apply(Settings);
+        // XAML 的 Topmost="True" 只是设计期默认值，实际层级由「设置 → 窗口调整」决定。
+        ApplyTopmost();
         ApplyWindowIcon();InitializeGlass();ApplySkinVisual(false);SyncZoomButton();InitializeSizing();
         _undo=new UndoService(App.Store.DataDirectory);
         _autoCollect=new AutoCollectService(()=>App.Store,count=>
@@ -148,6 +150,9 @@ public partial class MainWindow : Window
         _activeCategory=Store.State.Categories.FirstOrDefault(c=>c.Id!="uncategorized")?.Id;
         Render();
     }
+    // 置顶开关唯一的应用点：启动、设置变更、导入配置包与自检都走这里，
+    // 避免 XAML 静态值与用户偏好各自维护一份状态。
+    internal void ApplyTopmost()=>Topmost=Settings.AlwaysOnTop;
     // 任务栏按钮图标取自窗口 Icon。XAML 用 PNG 作保底，避免图标资源异常时任务栏
     // 退回默认的空白文档图标；这里优先换成标准 DIB 多尺寸 ICO，保证不同 DPI 下清晰。
     private void ApplyWindowIcon()
@@ -299,7 +304,7 @@ public partial class MainWindow : Window
     private async void Place()
     {
         if(_resizing || KeepOpenForVerification || !IsLoaded || WindowState!=WindowState.Normal)return;
-        // 用户手动拖动过面板后不再贴回任务栏，直到在“窗口大小”里选择“贴回任务栏”。
+        // 用户手动拖动过面板后不再贴回任务栏，直到在「设置 → 窗口调整」里选择「贴回任务栏」。
         if(_manualPlacement){ApplyManualPosition();return;}
         var version=++_placementVersion;
         TaskbarPlacement.Apply(this,TaskbarPlacement.Fallback(),PreferredWindowSize);
@@ -472,7 +477,7 @@ public partial class MainWindow : Window
     private void OnCloseButton(object sender,RoutedEventArgs e){ResetCaptionState();Close();}
     private void OnMinimizeButton(object sender,RoutedEventArgs e){ResetCaptionState();WindowState=WindowState.Minimized;}
     // 标题栏方框按钮：点击直接最大化，再点还原，不再弹出尺寸选择菜单。
-    // 尺寸预设、锁定宽高比与「贴回任务栏」仍保留在「更多 → 窗口大小」。
+    // 尺寸预设、锁定宽高比与「贴回任务栏」已迁入「设置 → 窗口调整」。
     internal void OnZoomButton(object sender,RoutedEventArgs e)
     {
         ResetCaptionState();
@@ -814,7 +819,7 @@ public partial class MainWindow : Window
         foreach(var entry in entries)
         {
             // 从子菜单里取出的项仍挂在原 ItemsControl 上，直接 Add 会抛
-            // 「元素已具有逻辑父级」（点标题栏「窗口大小」即走这条路径）。
+            // 「元素已具有逻辑父级」（设置页下拉复用菜单项时可能走这条路径）。
             if(entry is FrameworkElement fe&&LogicalTreeHelper.GetParent(fe) is ItemsControl oldParent&&oldParent.Items.Contains(entry))
                 oldParent.Items.Remove(entry);
             menu.Items.Add(entry);
@@ -874,28 +879,26 @@ public partial class MainWindow : Window
         ]);
         Popup(owner,items);
     }
-    private void OnMore(object sender,RoutedEventArgs e)
-    {
-        // 自启、关闭行为、主题、热键与数据备份已迁到独立设置页；这里只留页面入口与高级操作。
-        Popup((FrameworkElement)sender,[
+    private void OnMore(object sender,RoutedEventArgs e)=>Popup((FrameworkElement)sender,MoreMenuEntries());
+    // 菜单内容单独暴露给自检：自启、关闭行为、主题、热键、数据备份已迁到设置页，
+    // 「文件管理」子菜单移除（打开数据目录仍在设置页），「窗口大小」整体迁入「设置 → 窗口调整」。
+    // 这里只留页面入口与高级操作。
+    internal List<object> MoreMenuEntries()=>[
         // 页面级入口统一收到菜单顶部：不再占用分类导航条，功能与快捷键均保留。
         Menu("新建分类",()=>OnNewCategory(this,new RoutedEventArgs())),
         Menu("浏览全部图标…",ShowCatalogView),
         Menu("打开设置",()=>OnSettingsToggle(this,new RoutedEventArgs())),
         Menu("撤销上一步（Ctrl+Z）",UndoLast),
         Menu("检查失效入口",()=>OnCleanBroken(this,new RoutedEventArgs())),
-        FileManagerMenu(),
         new Separator(),
-        WindowSizeMenu(),new Separator(),
         Menu(UpdateMenuText,()=>_ = CheckOnlineUpdateAsync(true),OnlineUpdater.Enabled),
         Menu("从本地文件更新…",()=>_ = SelectUpdateAsync()),
         Menu("全部移回桌面",RestoreAll,Store.State.Items.Count>0),
         Menu("创建桌面与开始菜单入口",()=>Run(()=>ShortcutInstaller.InstallAll(),"已创建桌面与开始菜单入口，可右键固定到任务栏")),
         Menu("如何固定到任务栏",()=>{_interactions++;try{UiDialogs.Show(this,"右键任务栏上的“番茄桌面”图标，选择“固定到任务栏”。\n\n固定后点击同一个入口即可打开或收起番茄桌面。","番茄桌面");}finally{_interactions--;}}),
-        Menu("打开数据目录",()=>Process.Start(new ProcessStartInfo("explorer.exe",Store.DataDirectory){UseShellExecute=true})),
+        Menu("打开数据目录",()=>OpenExplorer(Store.DataDirectory)),
         new Separator(),Menu("退出并结束进程",Quit)
-    ]);
-    }
+    ];
     private async Task SelectUpdateAsync()
     {
         _interactions++;
