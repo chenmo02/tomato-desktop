@@ -152,6 +152,7 @@ internal static class SizingVerification
             window.ShowSettingsView();await Layout();
             var settingsText=Find<TextBlock>(window).Select(t=>t.Text).ToList();
             Check(new[]{"窗口调整","窗口大小","锁定宽高比","恢复默认大小","贴回任务栏","窗口置顶"}.All(label=>settingsText.Contains(label)),"设置页窗口调整分组包含尺寸、置顶与贴回入口");
+            Check(new[]{"隐藏到托盘","关闭时结束进程"}.All(label=>settingsText.Contains(label)),"设置页行为分组包含托盘后台与关闭偏好入口");
             // 分组下半部分默认需要滚动，这里滚到分组顶部留图，便于核对置顶开关与贴回按钮。
             var windowSection=window.SettingsGroups.Children.OfType<StackPanel>().Skip(1).First();
             var scroller=Find<ScrollViewer>(window.SettingsSurface).First();
@@ -167,6 +168,15 @@ internal static class SizingVerification
             App.Store.MoveItemToIndex(ids[0],0);window.Render();await Layout();
             Check(App.Store.State.Items[0].Id==ids[0],"顺序可恢复");
             Snapshot("default");
+            // 托盘后台驻留：× 隐藏窗口、托盘状态切换、恢复后尺寸与布局不变。
+            if(window.Tray is null||!window.Tray.Visible)throw new Exception("通知区图标未创建。");
+            Check(window.Tray.MenuLabels.Contains("退出并结束进程"),"托盘右键菜单提供退出入口");
+            var widthBefore=window.Width;var heightBefore=window.Height;
+            window.HideToTray();
+            Check(!window.IsVisible&&window.Tray?.IsBackground==true,"点 × 后窗口隐藏且托盘显示后台状态");
+            window.ShowPanel();await Layout();
+            Check(window.IsVisible&&window.Tray?.IsBackground==false,"托盘唤起恢复窗口");
+            Check(Math.Abs(window.Width-widthBefore)<.01&&Math.Abs(window.Height-heightBefore)<.01,"托盘后台往返不改变窗口尺寸");
         }
         catch(Exception ex){failure=ex.ToString();}
         finally{File.WriteAllText(Path.Combine(root,"sizing-verification.json"),JsonSerializer.Serialize(new{passed=checks.Count,success=failure=="",failure,checks},new JsonSerializerOptions{WriteIndented=true}));Application.Current.Shutdown(failure==""?0:1);}

@@ -21,6 +21,9 @@ internal static class HotKeyService
     private static HwndSource? _source;
     private static Action? _pressed;
 
+    // 自检用：退出链路必须把热键注销干净。
+    internal static bool Registered=>_hwnd!=IntPtr.Zero;
+
     public static bool Register(Window window, Action pressed)
     {
         Unregister();

@@ -43,7 +43,10 @@ internal sealed class StartupOptions(string runKey = @"Software\Microsoft\Window
     internal void WriteWindowPosition(bool manual,double left,double top){using var key=Registry.CurrentUser.CreateSubKey(settingsKey,true);key.SetValue("WindowPosition",System.Text.Json.JsonSerializer.Serialize(new WindowPosition{Manual=manual,Left=left,Top=top}),RegistryValueKind.String);key.Flush();}
     public bool Enabled {get{using var key=Registry.CurrentUser.OpenSubKey(runKey);return key?.GetValue(ValueName) is string value&&!string.IsNullOrWhiteSpace(value);}}
     public string? Command {get{using var key=Registry.CurrentUser.OpenSubKey(runKey);return key?.GetValue(ValueName) as string;}}
-    public bool CloseEndsProcess {get{using var key=Registry.CurrentUser.OpenSubKey(settingsKey);return key?.GetValue("CloseEndsProcess") is not int value || value!=0;}set{using var key=Registry.CurrentUser.CreateSubKey(settingsKey,true);key.SetValue("CloseEndsProcess",value?1:0,RegistryValueKind.DWord);key.Flush();}}
+    // 1.5 之前旧键「CloseEndsProcess」缺失时默认 true（点 × 直接退出）。新版默认改为
+    // 「× 隐藏到托盘、进程后台驻留」，因此换用新键并默认 false，升级用户旧的 1 不会被继承。
+    // 仍保留该偏好供需要「点 × 真退出」的用户显式开启；配置包导出 / 导入沿用同一字段。
+    public bool CloseEndsProcess {get{using var key=Registry.CurrentUser.OpenSubKey(settingsKey);return key?.GetValue("CloseEndsProcessV2") is int value && value!=0;}set{using var key=Registry.CurrentUser.CreateSubKey(settingsKey,true);key.SetValue("CloseEndsProcessV2",value?1:0,RegistryValueKind.DWord);key.Flush();}}
     public void SetEnabled(bool enabled,string? executable=null)
     {
         using var key=Registry.CurrentUser.CreateSubKey(runKey,true);

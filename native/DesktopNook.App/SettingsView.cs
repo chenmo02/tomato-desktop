@@ -179,7 +179,8 @@ public partial class MainWindow
         _autoCollectCheck = SettingCheckBox(behavior, "自动收纳新桌面图标", "每 15 秒检查桌面，新增项目自动收进「未分类」");
         _systemItemsCheck = SettingCheckBox(behavior, "显示系统项目", "「全部图标」中默认隐藏 Windows 工具、命令行、诊断组件等系统项目，开启后一并列出");
         behavior.Add(SettingRow("立即扫描桌面", "不等下一轮，马上收纳桌面上的新项目", ActionButton("立即扫描", OnScanNow)));
-        _closeCheck = SettingCheckBox(behavior, "关闭时结束进程", "关闭按钮直接退出；关闭后面板只收起");
+        behavior.Add(SettingRow("隐藏到托盘", "点 × 或点此按钮都会收进通知区后台运行；右键托盘图标可打开设置或退出", ActionButton("后台运行", OnHideToTray)));
+        _closeCheck = SettingCheckBox(behavior, "关闭时结束进程", "默认关闭：点 × 只隐藏窗口，程序在托盘后台运行；开启后点 × 直接退出进程");
         SettingsGroups.Children.Add(SettingsSection("行为", behavior.ToArray()));
 
         var data = new List<FrameworkElement>
@@ -379,6 +380,9 @@ public partial class MainWindow
         UpdateTabSelection();
         RefreshSettingsControls();
     }
+
+    // 与标题栏 × 走同一条后台驻留路径，方便在设置页里直接验证托盘入口。
+    private void OnHideToTray(object sender, RoutedEventArgs e) => HideToTray();
 
     private void OnScanNow(object sender, RoutedEventArgs e)
     {

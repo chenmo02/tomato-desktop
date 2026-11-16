@@ -92,6 +92,9 @@ internal static class NativeVerification
     public static async Task Run(MainWindow window,string root)
     {
         var checks=new List<string>();var failure="";window.KeepOpenForVerification=true;
+        // 「退出并结束进程」最终会 Environment.Exit；自检进程自身不能退出，
+        // 这里替换成只计数的动作，以便完整断言清理链路。
+        AppExit.UseOverride(_=>{});
         try
         {
             if(!App.IsSandbox)throw new InvalidOperationException("界面自检只允许在 --sandbox 目录运行。");
@@ -138,7 +141,12 @@ internal static class NativeVerification
                 using(var unrelated=Registry.CurrentUser.CreateSubKey(optionKey+@"\Run"))unrelated.SetValue("OtherEntry","keep");
                 options.SetEnabled(true,@"C:\验证 空格\番茄桌面.exe");
                 if(!options.Enabled||options.Command!="\"C:\\验证 空格\\番茄桌面.exe\" --autostart")throw new Exception("自启路径引用异常。");
-                options.CloseEndsProcess=false;if(new StartupOptions(optionKey+@"\Run",optionKey+@"\Settings").CloseEndsProcess)throw new Exception("关闭行为设置未保留。");
+                options.CloseEndsProcess=true;if(!new StartupOptions(optionKey+@"\Run",optionKey+@"\Settings").CloseEndsProcess)throw new Exception("关闭行为设置未保留。");
+                options.CloseEndsProcess=false;if(new StartupOptions(optionKey+@"\Run",optionKey+@"\Settings").CloseEndsProcess)throw new Exception("关闭行为未回到托盘驻留默认值。");
+                // 1.5 之前旧键缺失时默认「点 × 退出」，升级用户注册表里可能残留 1；新版必须忽略它。
+                using(var legacy=Registry.CurrentUser.CreateSubKey(optionKey+@"\Settings"))legacy.SetValue("CloseEndsProcess",1,RegistryValueKind.DWord);
+                if(new StartupOptions(optionKey+@"\Run",optionKey+@"\Settings").CloseEndsProcess)throw new Exception("旧版「关闭时结束进程=1」被错误继承。");
+                checks.Add("Legacy close-to-exit registry value ignored; background tray is the new default");
                 options.SetEnabled(false);using var check=Registry.CurrentUser.OpenSubKey(optionKey+@"\Run");if(options.Enabled||check?.GetValue("OtherEntry") as string!="keep")throw new Exception("关闭自启影响其他入口。");
                 checks.Add("Startup option persists quoted command, can be disabled and preserves other entries");
                 checks.Add("Close-to-exit preference persists independently of collection data");
@@ -703,14 +711,139 @@ internal static class NativeVerification
             }
             catch(Exception ex){checks.Add("Catalog layout preview unavailable: "+ex.Message);}
             finally{window.ShowIconsView();}
+
+            // 关闭按钮 → 托盘后台驻留：窗口隐藏但进程存活，托盘图标与右键菜单始终可用。
+            if(window.Tray is null||!window.Tray.Visible)throw new Exception("通知区图标未创建。");
+            if(!window.Tray.UsesAppIcon)throw new Exception("托盘未使用程序内嵌的番茄图标。");
+            checks.Add("Tray icon uses the embedded multi-size application ICO");
+            var trayMenu=window.Tray!.MenuLabels;
+            if(!trayMenu.Contains("打开番茄桌面")||!trayMenu.Contains("打开设置")||!trayMenu.Contains("退出并结束进程"))
+                throw new Exception("托盘右键菜单入口不完整："+string.Join("/",trayMenu));
+            checks.Add("System tray icon is created at startup with open, settings and exit menu items");
+            // 右键菜单视觉：必须是 WPF 的 WinUI 卡片，不能退回 WinForms 系统蓝块菜单。
+            if(window.Tray.UsesNativeStrip)throw new Exception("托盘仍在使用 WinForms 系统默认菜单。");
+            var trayVisual=window.Tray.OpenMenu();
+            if(trayVisual is null||!trayVisual.IsOpen)throw new Exception("WPF 托盘菜单未打开。");
+            if(trayVisual.Items.Count!=6)throw new Exception("托盘菜单项数量异常："+trayVisual.Items.Count);
+            await window.Dispatcher.InvokeAsync(()=>{},DispatcherPriority.ContextIdle);
+            var trayRoot=System.Windows.PresentationSource.FromVisual(trayVisual)?.RootVisual as FrameworkElement;
+            if(trayRoot is null)throw new Exception("托盘菜单未生成可视树。");
+            trayRoot.UpdateLayout();
+            if(CountVisuals<System.Windows.Shapes.Path>(trayRoot)<3)throw new Exception("托盘菜单缺少行首线性图标。");
+            if(trayVisual.Background is not SolidColorBrush lightBrush)throw new Exception("托盘菜单未使用主题画刷。");
+            SaveTrayPreview(root,"tray-menu-preview.png",trayRoot,false);
+            checks.Add("Tray context menu uses the WPF WinUI card with glyphs, shortcut hint and theme brushes");
+            // 品牌头里的番茄图标不能再套彩色圆角底块（玻璃皮肤下会变成显眼的粉红色）。
+            var badge=FindTagged<Border>(trayRoot,"TrayBadge");
+            if(badge is null)throw new Exception("托盘品牌头缺少徽标容器。");
+            if(badge.Background is SolidColorBrush badgeFill&&badgeFill.Color.A>0)
+                throw new Exception("番茄图标仍有彩色底块："+badgeFill.Color);
+            checks.Add("Tray brand icon has no coloured tile behind it");
+            if(!TrayService.HookInstalled)throw new Exception("托盘菜单的全局鼠标钩子未安装，点击外部将无法关闭。");
+            // 点击外部关闭：走与真实全局鼠标钩子完全相同的路径，菜单内点击不得误关。
+            if(!TrayMenu.TryGetMenuRect(trayVisual,out var menuBounds))throw new Exception("无法取得托盘菜单矩形。");
+            window.Tray.HandleOutsideClick((int)menuBounds.Left+10,(int)menuBounds.Top+10);
+            if(window.Tray.Menu?.IsOpen!=true)throw new Exception("点击菜单内部被误关。");
+            checks.Add("Clicks inside the tray menu keep it open");
+            if(!window.Tray.TryOutsideTestPoint(out var outsideX,out var outsideY))
+                throw new Exception("无法构造菜单外部测试点。");
+            window.Tray.HandleOutsideClick(outsideX,outsideY);
+            if(window.Tray.Menu?.IsOpen==true)throw new Exception("点击菜单外部后菜单未关闭。");
+            checks.Add("Clicking outside the tray menu dismisses it even when the main window is hidden");
+            window.Tray.CloseMenu();
+            if(TrayService.HookInstalled)throw new Exception("菜单关闭后全局鼠标钩子未卸载。");
+            checks.Add("Low-level mouse hook is installed only while the tray menu is open");
+            // 主题跟随：切到深色后重建菜单，卡片底色必须随动态资源一起变化。
+            ThemeService.Apply(window.Settings with{Theme="dark"});
+            var darkMenu=window.Tray.OpenMenu();
+            if(darkMenu?.Background is not SolidColorBrush darkBrush||darkBrush.Color==lightBrush.Color)
+                throw new Exception("托盘菜单未跟随深色主题。");
+            await window.Dispatcher.InvokeAsync(()=>{},DispatcherPriority.ContextIdle);
+            if(System.Windows.PresentationSource.FromVisual(darkMenu)?.RootVisual is FrameworkElement darkRoot)
+            {
+                darkRoot.UpdateLayout();SaveTrayPreview(root,"tray-menu-dark-preview.png",darkRoot,true);
+            }
+            window.Tray.CloseMenu();
+            ThemeService.Apply(window.Settings);
+            checks.Add("Tray menu follows light and dark theme palettes without rebuilding the window");
+            if(App.Options.CloseEndsProcess)throw new Exception("关闭时结束进程应默认关闭，× 应收进托盘。");
+            var trayClose=FindNamedButton(window,"关闭番茄");
+            trayClose.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Button.ClickEvent));
+            if(window.IsVisible)throw new Exception("点 × 后窗口未隐藏到托盘。");
+            if(window.Tray?.IsBackground!=true||!window.Tray.Text.Contains("后台运行"))throw new Exception("托盘未切换到后台驻留状态。");
+            checks.Add("Close button hides the window into the tray instead of terminating the process");
+            // 真实使用场景：窗口是隐藏的，Popup 宿主不能因此失效。
+            var hiddenMenu=window.Tray!.OpenMenu();
+            await window.Dispatcher.InvokeAsync(()=>{},DispatcherPriority.ContextIdle);
+            if(hiddenMenu?.IsOpen!=true||System.Windows.PresentationSource.FromVisual(hiddenMenu)?.RootVisual is null)
+                throw new Exception("窗口隐藏到托盘后右键菜单无法显示。");
+            window.Tray.CloseMenu();
+            checks.Add("Tray menu still opens while the main window is hidden in the background");
+            // 托盘左键 / 热键 / 单实例激活最终都走 ShowPanel；这里直接模拟唤起。
+            window.ShowPanel();
+            if(!window.IsVisible||window.Tray?.IsBackground==true)throw new Exception("托盘唤起未恢复窗口。");
+            checks.Add("Tray restore brings the panel back and clears the background state");
+            // 「隐藏到托盘」按钮与 × 共用同一条路径。
+            window.HideToTray();if(window.IsVisible)throw new Exception("设置页「后台运行」未隐藏窗口。");
+            window.ShowPanel();checks.Add("Settings hide-to-tray button shares the same background path");
+            // 托盘右键「退出并结束进程」必须真正结束进程：断言它请求了进程级退出，
+            // 并把托盘图标、鼠标钩子、全局热键与 IPC 资源全部收干净。
+            var requestsBefore=AppExit.Requests;
+            var quitMenu=window.Tray!.OpenMenu();
+            var quitItem=quitMenu is null?null:TrayMenu.FindExitItem(quitMenu);
+            if(quitItem is null)throw new Exception("托盘菜单缺少「退出并结束进程」项。");
+            quitItem.RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+            if(AppExit.Requests!=requestsBefore+1||!window.ExitRequested)
+                throw new Exception("托盘退出项未请求进程级退出。");
+            if(window.Tray is not null)throw new Exception("退出时托盘图标未释放。");
+            if(TrayService.HookInstalled)throw new Exception("退出时全局鼠标钩子未卸载。");
+            if(HotKeyService.Registered)throw new Exception("退出时全局热键未注销。");
+            checks.Add("Tray exit item requests a process-level exit and releases tray icon, mouse hook and global hotkey");
         }
         catch(Exception ex){failure=ex.ToString();}
         finally
         {
+            AppExit.UseOverride(null);
             Directory.CreateDirectory(root);File.WriteAllText(Path.Combine(root,"native-verification.json"),JsonSerializer.Serialize(new{passed=checks.Count,failure,checks,realDesktopModified=false},new JsonSerializerOptions{WriteIndented=true}));
             Application.Current.Shutdown(failure.Length==0?0:1);
         }
     }
+    private static T? FindTagged<T>(DependencyObject root,object tag) where T : FrameworkElement
+    {
+        if(root is T element&&Equals(element.Tag,tag))return element;
+        var children=VisualTreeHelper.GetChildrenCount(root);
+        for(var i=0;i<children;i++)
+        {
+            var found=FindTagged<T>(VisualTreeHelper.GetChild(root,i),tag);
+            if(found is not null)return found;
+        }
+        return null;
+    }
+
+    private static int CountVisuals<T>(DependencyObject root) where T : DependencyObject
+    {
+        var count=root is T?1:0;
+        var children=VisualTreeHelper.GetChildrenCount(root);
+        for(var i=0;i<children;i++)count+=CountVisuals<T>(VisualTreeHelper.GetChild(root,i));
+        return count;
+    }
+
+    // 菜单是透明 Popup，直接 Render 出来背景透明、圆角与投影看不清；先铺一层与主题一致的底色。
+    private static void SaveTrayPreview(string root,string name,FrameworkElement menuRoot,bool dark)
+    {
+        var w=(int)Math.Ceiling(menuRoot.ActualWidth);var h=(int)Math.Ceiling(menuRoot.ActualHeight);
+        if(w<1||h<1)return;
+        var visual=new DrawingVisual();
+        using(var context=visual.RenderOpen())
+        {
+            context.DrawRectangle(new SolidColorBrush(dark?Color.FromRgb(0x20,0x20,0x20):Colors.White),null,new Rect(0,0,w,h));
+            context.DrawRectangle(new VisualBrush(menuRoot){Stretch=Stretch.None,AlignmentX=AlignmentX.Left,AlignmentY=AlignmentY.Top},null,new Rect(0,0,w,h));
+        }
+        var bitmap=new RenderTargetBitmap(w,h,96,96,PixelFormats.Pbgra32);bitmap.Render(visual);
+        var png=new PngBitmapEncoder();png.Frames.Add(BitmapFrame.Create(bitmap));
+        using var file=File.Create(Path.Combine(root,name));png.Save(file);
+    }
+
     private static System.Windows.Controls.Button FindNamedButton(DependencyObject root,string name)
     {
         for(var i=0;i<VisualTreeHelper.GetChildrenCount(root);i++){var child=VisualTreeHelper.GetChild(root,i);if(child is System.Windows.Controls.Button button&&System.Windows.Automation.AutomationProperties.GetName(button)==name)return button;try{return FindNamedButton(child,name);}catch(InvalidOperationException){}}

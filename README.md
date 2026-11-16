@@ -4,7 +4,7 @@
 
 **只收纳你选中的桌面图标，其余照旧留在桌面。** 番茄桌面是一个运行于 Windows 的桌面收纳工具：把快捷方式、文件或文件夹「喂给番茄」，之后从任务栏上的同一个入口按分类打开；需要时，一键把项目移回桌面。
 
-![版本](https://img.shields.io/badge/version-1.5-blue) ![平台](https://img.shields.io/badge/platform-Windows%2010%2F11%20x64-0078D6?logo=windows) ![框架](https://img.shields.io/badge/.NET-10-512BD4?logo=dotnet) ![许可证](https://img.shields.io/badge/license-not%20specified-lightgrey)
+![版本](https://img.shields.io/badge/version-1.5.1-blue) ![平台](https://img.shields.io/badge/platform-Windows%2010%2F11%20x64-0078D6?logo=windows) ![框架](https://img.shields.io/badge/.NET-10-512BD4?logo=dotnet) ![许可证](https://img.shields.io/badge/license-not%20specified-lightgrey)
 
 [Releases](https://github.com/chenmo02/tomato-desktop/releases) · [使用说明](docs/使用说明.md) · [架构与数据](docs/架构与数据.md) · [开发与构建](docs/开发与构建.md) · [打包与发布](docs/打包与发布.md) · [反馈问题](https://github.com/chenmo02/tomato-desktop/issues)
 
@@ -30,7 +30,8 @@
 - **外观**：Windows 11 风格面板，跟随系统深浅主题与强调色，也可固定；「原生系统」（Mica）与「玻璃拟态」（Acrylic）两套皮肤即时切换。主界面图标按 2× 物理像素超采样后高质量缩小，避免圆边与渐变处的锯齿杂边；解码时归一化图标透明边缘的 alpha 数据，消除圆形图标外沿的白色光晕；偏好随配置包导入导出。
 - **可撤销与可恢复**：收纳、移回、分类与排序改动进入最近 20 步撤销栈，操作日志保留 30 天；启动时校验失效快捷方式，可在设置里批量清理。
 - **自动化与偏好**：全局热键 `Ctrl+Alt+T`、可选开机自启、自动收纳新桌面图标（面板可见时每 15 秒扫描、收起后降频到 60 秒并在恢复显示时立即补扫，默认关闭）、失焦自动收起（默认关闭）。
-- **后台资源控制**：图标解码线程按需启动、空闲 20 秒自动退出；图标位图按 48 MB 预算做 LRU 淘汰；面板收起时释放玻璃壁纸位图、模糊背景层与「全部图标」页视觉树，恢复显示时按需重建，收纳数据、分类与设置不受影响。
+- **托盘后台驻留**：点标题栏 × 只隐藏窗口、不结束进程，通知区托盘图标常驻；左键 / 双击图标、点击任务栏入口或按热键都能重新打开，右键托盘图标打开与主界面一致的 WinUI 圆角菜单（品牌头、线性图标、快捷键提示，自动跟随浅色 / 深色主题；番茄图标不带彩色底块），可打开面板、打开设置或退出，点击菜单外任意位置即收起。真退出请用托盘右键菜单、「设置 → 关于 → 退出并结束进程」或「更多 → 退出并结束进程」：会先释放托盘图标、全局热键、鼠标钩子与单实例资源，再直接结束进程，任务管理器里不会残留无窗口的后台实例，也不会继续占用程序集文件。确需「点 × 直接退出」可在「设置 → 行为」显式开启（默认关闭）。
+- **后台资源控制**：图标解码线程按需启动、空闲 20 秒自动退出；图标位图按 48 MB 预算做 LRU 淘汰；面板最小化或隐藏到托盘时释放玻璃壁纸位图、模糊背景层与「全部图标」页视觉树，恢复显示时按需重建，收纳数据、分类与设置不受影响。
 - **统一更新窗口**：本地文件更新与在线更新共用一个 480px 窗口，按状态展示版本迁移、下载进度阶段、数据安全声明与失败重试；校验版本、产品标识与文件后在原位置替换并重启，保留分类、收纳内容和设置。
 
 完整交互说明见 [使用说明](docs/使用说明.md)。
@@ -101,7 +102,7 @@ dotnet run --project native/DesktopNook.Tests -c Release -- native/test-results/
 makensis /V2 native/scripts/Installer.nsi   # 需要 Unicode NSIS，输出 native/artifacts/DesktopNook-Setup.exe
 ```
 
-完整的测试、安装器与发行步骤见 [开发与构建](docs/开发与构建.md)；从版本号 bump 到发布 Release 的可执行清单见 [打包与发布](docs/打包与发布.md)。原生 UI 自检会短暂操控鼠标，必须在专用隔离目录中运行。
+完整的测试、安装器与发行步骤见 [开发与构建](docs/开发与构建.md)；从版本号 bump 到发布 Release 的可执行清单见 [打包与发布](docs/打包与发布.md)。原生 UI 自检会短暂操控鼠标，必须在专用隔离目录中运行。`native/scripts/Verify-StartupExit.ps1` 在真实进程上核对启动、单实例、后台驻留与所有真退出入口结束后无残留实例（脚本需 UTF-8 BOM + CRLF，供 Windows PowerShell 5.1 正确读取中文注释）。
 
 ## 数据与备份
 
@@ -109,7 +110,7 @@ makensis /V2 native/scripts/Installer.nsi   # 需要 Unicode NSIS，输出 nativ
 
 - 分类、收纳索引与恢复清单默认保存在 `%LOCALAPPDATA%\DesktopNook`（`state.json`、`migration.json`、`vault/`、`updates/`）；程序本体 `DesktopNook.exe` 与卸载器也安装在该目录，覆盖升级只替换程序文件，不改动数据。
 - 跨卷托管的文件可能位于原桌面同卷的隐藏 `.DesktopNookVault`，只备份 JSON 或默认数据目录不足以覆盖全部实际内容。
-- 窗口、主题、自启与关闭行为等偏好保存在当前 Windows 用户设置；「设置 → 数据与备份」可导出 / 导入 zip 配置包，导入前会自动备份。
+- 窗口、主题、自启、置顶与关闭行为等偏好保存在当前 Windows 用户设置；「设置 → 数据与备份」可导出 / 导入 zip 配置包，导入前会自动备份。1.5 起「关闭时结束进程」改由新键保存并默认关闭，旧版本写入的旧值不再被继承，避免点 × 意外退出。
 - 所有数据仅保存在本机，不上传、无云端或跨设备同步；卸载时会先尝试恢复已收纳项目，有失败项时保留程序以便重试，恢复成功后数据目录仍保留，需手动清理。
 
 细节见 [架构与数据](docs/架构与数据.md)。
@@ -140,7 +141,7 @@ native/
 
 ## 项目状态与已知限制
 
-- 当前源码版本 **1.5**，基于 WPF / .NET 10（`net10.0-windows`），面向 Windows 10 / 11 x64。
+- 当前源码版本 **1.5.1**，基于 WPF / .NET 10（`net10.0-windows`），面向 Windows 10 / 11 x64。
 - **在线更新已启用**：`OnlineUpdater.Repository` 指向 `chenmo02/tomato-desktop`，启动后台检查与「更多 → 检查在线更新」均可用；检查与下载需能访问 GitHub。发布资产必须为 `DesktopNook-Setup.exe`，且 GitHub 返回的 `digest`（`sha256:…`）与 `size` 有效，下载地址须落在该仓库的 `/releases/download/` 路径下，否则检查会拒绝更新而不下载。
 - 公共桌面快捷方式与被占用文件受 Windows 权限限制，失败时保留原项目并提示；符号链接、目录联接及未落地的云占位内容暂不按普通文件夹收纳。
 - 图标清晰度受原应用资源限制；跨屏 DPI 切换已由 `--dpi-self-test` 覆盖（窗口圆角区域、内容层与壁纸对齐会随 DPI 重算），但不同显示器缩放组合仍未逐一实机验收。

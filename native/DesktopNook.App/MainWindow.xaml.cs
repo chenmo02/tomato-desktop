@@ -60,7 +60,12 @@ public partial class MainWindow : Window
     internal void RefreshVersionBadge()=>ApplyVersionBadge(_latestRelease?.Version);
     // 尺寸自检用：不访问网络，直接预览「有更新 / 无更新」两种状态。
     internal void PreviewVersionBadge(Version? update)=>ApplyVersionBadge(update);
-    private bool _dragging; private int _interactions; private int _menus; private bool _allowExit; private DateTime _suppressUntil;
+    private bool _dragging; private int _interactions; private int _menus; private bool _allowExit; private bool _exitRequested; private DateTime _suppressUntil;
+    // 自检用：确认用户点「退出并结束进程」后确实进入了进程级退出链路。
+    internal bool ExitRequested=>_exitRequested;
+    // 托盘图标随主窗口创建：× 隐藏窗口后进程继续运行，托盘成为唯一的可见入口。
+    private TrayService? _tray;
+    internal TrayService? Tray => _tray;
     // 双击会产生两次 Up/Click，用同一项的短节流保证只启动一次。
     private string? _lastLaunchId; private DateTime _lastLaunchAt;
     // 网格内拖动：鼠标捕获期间记录按钮与起点；松手后按落点重排顺序。
@@ -122,6 +127,13 @@ public partial class MainWindow : Window
         DpiChanged+=(_,_)=>{QueueRegionRefresh();QueueDpiLayoutRefresh();};
         ContentRendered+=(_,_)=>SettleBackdropAfterFirstFrame();
         InitializeComponent();
+        // 通知区图标常驻；无 Shell / 无权限时静默降级，窗口与收纳功能不受影响。
+        try
+        {
+            _tray = new TrayService(this);
+            Closed += (_,_) => { _tray?.Dispose(); _tray = null; };
+        }
+        catch { _tray = null; }
         // 侧栏版本文字跟随程序集版本与在线检查结果，避免 XAML 里的占位值与 csproj 脱节。
         RefreshVersionBadge();
         // 主题必须在窗口布局前应用：App.xaml 里的画刷是共享实例，改色后所有控件同步生效。
@@ -368,8 +380,32 @@ public partial class MainWindow : Window
             Keyboard.ClearFocus();
             Mouse.Synchronize();
         }));
-    public void ShowPanel() { WindowState=WindowState.Normal; Show(); Place(); Activate(); ResetCaptionState(); }
+    public void ShowPanel()
+    {
+        WindowState=WindowState.Normal; Show(); Place(); Activate(); ResetCaptionState();
+        _tray?.SetBackgroundState(false);
+        // 从托盘隐藏态恢复时 WindowState 没有变化，OnStateChanged 不会触发，需显式重建后台资源。
+        ResumeIdleResources();
+    }
     public void TogglePanel(){if(WindowState!=WindowState.Minimized&&IsVisible)WindowState=WindowState.Minimized;else ShowPanel();}
+    // 点 × / 「隐藏到托盘」：隐藏窗口而不是关闭窗口，任务栏按钮随之消失，进程继续在托盘驻留。
+    // 隐藏态下 WindowState 不变，所以资源挂起必须在这里显式触发，恢复由 ShowPanel 负责。
+    internal void HideToTray()
+    {
+        ResetCaptionState();
+        Hide();
+        _tray?.SetBackgroundState(true);
+        SuspendIdleResources();
+        SetStatus("已在托盘后台运行，点击托盘图标或按 "+HotKeyService.Display+" 可重新打开");
+        _tray?.NotifyBackgroundTip();
+    }
+    // 托盘右键「打开设置」：先唤起面板，再保证设置分组已构建。
+    internal void OpenSettingsFromTray()
+    {
+        ShowPanel();
+        if(!_settingsLoaded){BuildSettings();_settingsLoaded=true;}
+        ShowSettingsView();
+    }
     // 面板长期驻留后台时，只保留「随时能被唤起」所需的状态：释放玻璃壁纸位图、
     // 模糊背景层、「全部图标」页上百个卡片控件和图标缓存里的冷门尺寸。收纳数据、
     // 分类、窗口位置与设置全部保留；恢复显示时按原路径重建，不改变交互语义。
@@ -452,7 +488,8 @@ public partial class MainWindow : Window
     }
     private void TryAutoHide()
     {
-        if(KeepOpenForVerification||IsActive||WindowState==WindowState.Minimized)return;
+        // 已收进托盘时窗口不可见，不能再把 WindowState 改成 Minimized（恢复时会出现空白帧）。
+        if(KeepOpenForVerification||!IsVisible||IsActive||WindowState==WindowState.Minimized)return;
         // 拖出图标时 _dragging 会在 DoDragDrop 返回后立刻置回 false，但失活检查是排队执行的；
         // 保护期 + 拖放事件持续刷新，覆盖拖放全过程与结束后的空档。
         if(_interactions>0||_dragging||_menus>0||DateTime.UtcNow<_hideGuardUntil)return;
@@ -472,8 +509,13 @@ public partial class MainWindow : Window
     {
         if(_allowExit){HotKeyService.Unregister();return;}e.Cancel=true;
         if(_dragging||_interactions>0)return;
-        if(App.Options.CloseEndsProcess){_allowExit=true;e.Cancel=false;Dispatcher.BeginInvoke(()=>Application.Current.Shutdown());}else WindowState=WindowState.Minimized;
+        // 默认行为：× 只隐藏窗口并在托盘后台驻留，进程不退出；只有用户显式打开
+        // 「设置 → 行为 → 关闭时结束进程」才走真正退出。两条退出入口都必须经
+        // 过 Quit() 的进程级硬退出，不能只用 Application.Shutdown()。
+        if(App.Options.CloseEndsProcess){_allowExit=true;e.Cancel=false;Dispatcher.BeginInvoke(new Action(Quit));}
+        else HideToTray();
     }
+    // 关闭按钮：调用 Close() 让 OnClosing 统一裁决（拖拽/交互中则完全不响应）。
     private void OnCloseButton(object sender,RoutedEventArgs e){ResetCaptionState();Close();}
     private void OnMinimizeButton(object sender,RoutedEventArgs e){ResetCaptionState();WindowState=WindowState.Minimized;}
     // 标题栏方框按钮：点击直接最大化，再点还原，不再弹出尺寸选择菜单。
@@ -483,8 +525,29 @@ public partial class MainWindow : Window
         ResetCaptionState();
         WindowState=WindowState==WindowState.Maximized?WindowState.Normal:WindowState.Maximized;
     }
-    public void Quit() { _allowExit=true; Application.Current.Shutdown(); }
-    internal void QuitForMaintenance(){if(!_dragging&&_interactions==0)Quit();}
+    // 真正的退出：托盘右键「退出并结束进程」、设置页「关于 → 退出并结束进程」、
+    // 「更多 → 退出并结束进程」、关闭偏好、安装器维护命令与系统注销都汇聚到这里。
+    // 之前只调 Application.Shutdown()，在托盘常驻状态下会出现「窗口没了、进程还在」
+    // 的僵尸实例（无顶层窗口但继续锁住程序集），因此改成清理后直接 Environment.Exit。
+    public void Quit()
+    {
+        if(_exitRequested)return;
+        _exitRequested=true;_allowExit=true;
+        // 收起可能正在显示的托盘菜单并卸载全局鼠标钩子。
+        try{_tray?.CloseMenu();}catch{}
+        HotKeyService.Unregister();
+        // 停掉轮询计时器，避免退出瞬间还有一轮扫描在写数据。
+        try{_autoCollect?.SetEnabled(false);}catch{}
+        // 托盘图标必须先显式释放，否则硬退出后通知区会残留幽灵图标；
+        // 数据目录里的收纳状态每次操作都已同步落盘（WriteThrough + Flush），无需再存盘。
+        var tray=_tray;_tray=null;
+        try{tray?.Dispose();}catch{}
+        // 注销 IPC 等待、释放单实例互斥体、删除 instance.pid，让后续启动/安装立刻可用。
+        try{(Application.Current as App)?.CleanupIpc();}catch{}
+        AppExit.Exit(0);
+    }
+    // 安装器维护命令要求程序一定结束，不能再因拖拽中而静默忽略停止信号。
+    internal void QuitForMaintenance()=>Quit();
     public void SetStatus(string message) { Status.Text=message;Status.ToolTip=message; }
     public void Render()
     {

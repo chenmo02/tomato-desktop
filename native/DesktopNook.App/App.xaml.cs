@@ -10,6 +10,8 @@ public partial class App : Application
 {
     private Mutex? _mutex; private EventWaitHandle? _activate; private EventWaitHandle? _stop; private bool _ownsMutex;
     private RegisteredWaitHandle? _stopWait,_activateWait;
+    private static string? _instancePidFile;
+    private bool _ipcCleaned;
     public static NookStore Store { get; private set; } = null!;
     public static IRecycleBin Recycle { get; private set; } = null!;
     public static bool IsSandbox { get; private set; }
@@ -55,7 +57,9 @@ public partial class App : Application
             }
             _mutex = new Mutex(true, "Local\\DesktopNook-" + signature, out _ownsMutex);
             _activate = new EventWaitHandle(false, EventResetMode.AutoReset, "Local\\DesktopNook-Activate-" + signature);
-            if (!_ownsMutex) { if(!e.Args.Contains("--autostart"))_activate.Set(); Shutdown(); return; }
+            // 副本实例只负责唤醒已有面板，然后必须立刻结束进程。用进程级硬退出，
+            // 避免 Shutdown() 在某些托盘/消息钩子状态下留下无窗口的僵尸进程。
+            if (!_ownsMutex) { if(!e.Args.Contains("--autostart"))_activate.Set(); CleanupIpc(); AppExit.Exit(0); return; }
             var desktops = IsSandbox ? new[] { Path.Combine(root, "Desktop") } : new[] { Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory), Environment.GetFolderPath(Environment.SpecialFolder.CommonDesktopDirectory) };
             if (IsSandbox) Directory.CreateDirectory(desktops[0]);
             Recycle = IsSandbox ? new SandboxRecycle(root) : new WindowsRecycleBin();
@@ -68,7 +72,11 @@ public partial class App : Application
             window.KeepOpenForVerification=IsSandbox&&e.Args.Contains("--keep-open-verification");
             if(e.Args.Contains("--autostart")){window.ShowActivated=false;window.WindowState=WindowState.Minimized;}
             window.Show();
-            File.WriteAllLines(Path.Combine(root,"instance.pid"),[Environment.ProcessId.ToString(),Environment.ProcessPath??""]);
+            // 系统注销 / 关机时同样走「退出并结束进程」的硬退出路径，避免后台驻留
+            // 拦住窗口收尾、让系统一直等一个不会自己结束的进程。
+            SessionEnding += (_,_) => window.Quit();
+            _instancePidFile=Path.Combine(root,"instance.pid");
+            File.WriteAllLines(_instancePidFile,[Environment.ProcessId.ToString(),Environment.ProcessPath??""]);
             _stop=new EventWaitHandle(false,EventResetMode.AutoReset,"Local\\DesktopNook-Stop-"+signature);
             _stopWait=ThreadPool.RegisterWaitForSingleObject(_stop,(_,_)=>Dispatcher.BeginInvoke(()=>window.QuitForMaintenance()),null,Timeout.Infinite,false);
             _activateWait=ThreadPool.RegisterWaitForSingleObject(_activate, (_, _) => Dispatcher.BeginInvoke(() => window.TogglePanel()), null, Timeout.Infinite, false);
@@ -82,16 +90,47 @@ public partial class App : Application
             if (e.Args.Contains("--size-self-test")) Dispatcher.BeginInvoke(async () => await SizingVerification.Run(window, root), System.Windows.Threading.DispatcherPriority.Loaded);
             if (e.Args.Contains("--dpi-self-test")) Dispatcher.BeginInvoke(async () => await DpiVerification.Run(window, root), System.Windows.Threading.DispatcherPriority.Loaded);
             if (e.Args.Contains("--backdrop-self-test")) Dispatcher.BeginInvoke(async () => await BackdropVerification.Run(window, root), System.Windows.Threading.DispatcherPriority.Background);
+            // 托盘「退出并结束进程」端到端探针：先把窗口收进托盘，再从真实右键菜单里
+            // 触发退出项的 Click。父脚本以「进程在超时前退出 + 标记文件存在」判定成功，
+            // 这样能覆盖 Shutdown() 留下无窗口僵尸进程的旧问题。
+            if(IsSandbox&&e.Args.Contains("--verify-tray-exit"))
+                Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Loaded,new Action(async()=>
+                {
+                    await Task.Delay(500);
+                    File.WriteAllText(Path.Combine(root,"tray-exit-requested.txt"),Environment.ProcessId.ToString());
+                    window.HideToTray();
+                    var menu=window.Tray?.OpenMenu();
+                    var exitItem=menu is null?null:TrayMenu.FindExitItem(menu);
+                    if(exitItem is null)window.Quit();
+                    else exitItem.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.MenuItem.ClickEvent));
+                }));
         }
         catch (Exception ex) { MessageBox.Show("番茄桌面暂时无法打开。原文件和数据均保留。\n\n" + ex.Message, "番茄桌面", MessageBoxButton.OK, MessageBoxImage.Error); Shutdown(1); }
     }
     protected override void OnExit(ExitEventArgs e)
     {
-        // 注销两个 IPC 等待，避免退出时仍挂在线程池的等待队列上。
-        _stopWait?.Unregister(null);_activateWait?.Unregister(null);
-        _stop?.Dispose();_activate?.Dispose();
-        if(_ownsMutex)_mutex?.ReleaseMutex();_mutex?.Dispose();
+        CleanupIpc();
         base.OnExit(e);
+    }
+
+    // 硬退出不经过 OnExit，所以托盘退出、维护退出都主动调一次；幂等，
+    // 之后再触发正常 Shutdown 也不会重复释放。instance.pid 一并删掉，
+    // 免得安装器读到已结束实例的旧 PID 而误判程序仍在运行。
+    internal void CleanupIpc()
+    {
+        if(_ipcCleaned)return;_ipcCleaned=true;
+        try{_stopWait?.Unregister(null);_activateWait?.Unregister(null);}catch{}
+        _stopWait=null;_activateWait=null;
+        try{_stop?.Dispose();_activate?.Dispose();}catch{}
+        _stop=null;_activate=null;
+        try{if(_ownsMutex)_mutex?.ReleaseMutex();}catch{}
+        try{_mutex?.Dispose();}catch{}
+        _mutex=null;_ownsMutex=false;
+        if(_instancePidFile is not null)
+        {
+            try{File.Delete(_instancePidFile);}catch{}
+            _instancePidFile=null;
+        }
     }
 }
 
