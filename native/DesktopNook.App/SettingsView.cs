@@ -175,12 +175,12 @@ public partial class MainWindow
         var behavior = new List<FrameworkElement>();
         _startupCheck = SettingCheckBox(behavior, "开机自启", "登录 Windows 后自动在任务栏待命");
         _hotKeyCheck = SettingCheckBox(behavior, "全局热键 " + HotKeyService.Display, "任意界面下按热键即可唤起或收起面板");
-        _autoHideCheck = SettingCheckBox(behavior, "失焦时自动收起", "默认关闭：点击桌面或其它窗口不会收起面板，必须手动点 × 或按热键");
+        _autoHideCheck = SettingCheckBox(behavior, "失焦时自动收起", "默认关闭：点击桌面或其它窗口不会收起面板，可手动点 ×、按 Esc 或按热键关闭");
         _autoCollectCheck = SettingCheckBox(behavior, "自动收纳新桌面图标", "每 15 秒检查桌面，新增项目自动收进「未分类」");
         _systemItemsCheck = SettingCheckBox(behavior, "显示系统项目", "「全部图标」中默认隐藏 Windows 工具、命令行、诊断组件等系统项目，开启后一并列出");
         behavior.Add(SettingRow("立即扫描桌面", "不等下一轮，马上收纳桌面上的新项目", ActionButton("立即扫描", OnScanNow)));
-        behavior.Add(SettingRow("隐藏到托盘", "点 × 或点此按钮都会收进通知区后台运行；右键托盘图标可打开设置或退出", ActionButton("后台运行", OnHideToTray)));
-        _closeCheck = SettingCheckBox(behavior, "关闭时结束进程", "默认关闭：点 × 只隐藏窗口，程序在托盘后台运行；开启后点 × 直接退出进程");
+        behavior.Add(SettingRow("隐藏到托盘", "点 ×、按 Esc 或点此按钮都会收进通知区后台运行；右键托盘图标可打开设置或退出", ActionButton("后台运行", OnHideToTray)));
+        _closeCheck = SettingCheckBox(behavior, "关闭时结束进程", "默认关闭：点 × / 按 Esc 只隐藏窗口，程序在托盘后台运行；开启后直接退出进程");
         SettingsGroups.Children.Add(SettingsSection("行为", behavior.ToArray()));
 
         var data = new List<FrameworkElement>

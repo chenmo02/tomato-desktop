@@ -37,7 +37,9 @@ internal static class Maintenance
             }){IsBackground=true};
             worker.SetApartmentState(System.Threading.ApartmentState.STA);
             worker.Start();
-            if(!worker.Join(8000))
+            // 最多等 2.5 秒：Shell 固定是尽力而为的入口，不能让安装器一直等资源管理器。
+            // 超时会写 nav-pin-report.json，应用首次启动时在后台 STA 线程补做一次。
+            if(!worker.Join(2500))
                 try{File.WriteAllText(reportPath,JsonSerializer.Serialize(new{status="timeout",phase="shell-register",hint="导航窗格注册表项通常已写入；快速访问固定可能未生效，可运行 --maintenance=nav-pin 重试"}));}catch{}
             return created>0?0:1;
         }

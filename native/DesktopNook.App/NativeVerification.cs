@@ -3,6 +3,7 @@ using System.Runtime.InteropServices;
 using System.Text.Json;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Threading;
@@ -685,7 +686,10 @@ internal static class NativeVerification
             checks.Add("Undo stack rolls back the latest operation and keeps a local 30-day log");
 
             // 全局热键配置与自动收纳（新文件把写入时间回拨，模拟稳定落盘）。
-            if(!HotKeyService.Display.Contains("Ctrl"))throw new Exception("全局热键未配置。");
+            // 全局热键：界面提示与真正注册到系统的组合键必须一致（MOD_CONTROL|MOD_ALT + VK_T）。
+            if(HotKeyService.Display!="Ctrl + Alt + T"||HotKeyService.Modifiers!=0x0003||HotKeyService.VirtualKey!=0x54)
+                throw new Exception("全局热键不是 Ctrl + Alt + T。");
+            checks.Add("Global hotkey registers Ctrl + Alt + T and shows the same label in settings and tray");
             var autoRoot=Path.Combine(root,"auto-test");
             var autoDesktop=Path.Combine(autoRoot,"Desktop");Directory.CreateDirectory(autoDesktop);
             for(var i=0;i<2;i++)
@@ -786,6 +790,20 @@ internal static class NativeVerification
             // 「隐藏到托盘」按钮与 × 共用同一条路径。
             window.HideToTray();if(window.IsVisible)throw new Exception("设置页「后台运行」未隐藏窗口。");
             window.ShowPanel();checks.Add("Settings hide-to-tray button shares the same background path");
+            // Esc 关闭页面：与 × 共用 OnClosing 路径，默认隐藏到托盘。自检默认会阻止
+            // 键盘收起窗口，这里临时放行，验证完立刻唤起面板，不影响后续退出链路断言。
+            var escSource=PresentationSource.FromVisual(window);
+            if(escSource is null)throw new Exception("无法构造 Esc 键盘事件。");
+            window.KeepOpenForVerification=false;
+            try
+            {
+                var escArgs=new KeyEventArgs(Keyboard.PrimaryDevice,escSource,Environment.TickCount,Key.Escape){RoutedEvent=Keyboard.PreviewKeyDownEvent};
+                window.RaiseEvent(escArgs);
+                if(!escArgs.Handled)throw new Exception("Esc 未被当作关闭快捷键处理。");
+                if(window.IsVisible)throw new Exception("按 Esc 后面板未关闭到托盘。");
+                checks.Add("Escape closes the panel through the same tray path as the close button");
+            }
+            finally{window.ShowPanel();window.KeepOpenForVerification=true;}
             // 托盘右键「退出并结束进程」必须真正结束进程：断言它请求了进程级退出，
             // 并把托盘图标、鼠标钩子、全局热键与 IPC 资源全部收干净。
             var requestsBefore=AppExit.Requests;

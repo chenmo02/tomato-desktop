@@ -12,6 +12,9 @@ internal static class HotKeyService
     private const uint WmHotKey = 0x0312;
     private const uint ModAlt = 0x0001, ModControl = 0x0002;
     private const uint VkT = 0x54;
+    // 自检用：断言实际注册到系统的组合键与界面提示一致。
+    internal const uint Modifiers = ModControl | ModAlt;
+    internal const uint VirtualKey = VkT;
     public const string Display = "Ctrl + Alt + T";
 
     [DllImport("user32.dll", SetLastError = true)] private static extern bool RegisterHotKey(IntPtr hwnd, int id, uint modifiers, uint key);
@@ -34,7 +37,7 @@ internal static class HotKeyService
         _hwnd = hwnd;
         _pressed = pressed;
         _source.AddHook(Hook);
-        if (!RegisterHotKey(hwnd, HotKeyId, ModControl | ModAlt, VkT))
+        if (!RegisterHotKey(hwnd, HotKeyId, Modifiers, VirtualKey))
         {
             Unregister();
             return false;

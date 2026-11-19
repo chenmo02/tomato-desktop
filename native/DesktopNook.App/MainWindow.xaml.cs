@@ -269,9 +269,27 @@ public partial class MainWindow : Window
         Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Background,new Action(ScanBroken));
         // 启动与数据变更只同步展示目录里的快捷方式；「固定到快速访问」由安装流程
         // --maintenance=shortcut 完成，避免每次启动都改写用户的资源管理器设置。
+        // 安装时 Shell 固定最多等 2.5 秒，超时会留报告；这里用独立 STA 后台线程补做一次，
+        // 既不阻塞 UI，也不让安装器一直等资源管理器。
         Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Background,new Action(()=>
         {
             try{ExplorerNavService.Sync(Store.DataDirectory,Store);}catch{}
+            if(App.IsSandbox)return;
+            var retry=new Thread(()=>
+            {
+                try
+                {
+                    var report=Path.Combine(Store.DataDirectory,"nav-pin-report.json");
+                    if(!File.Exists(report))return;
+                    var text=File.ReadAllText(report);
+                    if(!text.Contains("\"status\":\"timeout\"")&&!text.Contains("\"status\":\"pending\""))return;
+                    var pinned=ExplorerNavService.Register(Store.DataDirectory,Store);
+                    File.WriteAllText(report,ExplorerNavService.Diagnose(Store.DataDirectory,pinned));
+                }
+                catch{}
+            }){IsBackground=true};
+            retry.SetApartmentState(System.Threading.ApartmentState.STA);
+            retry.Start();
         }));
         if(Store.RecoveryMessages.Count>0) SetStatus(Store.RecoveryMessages.Last());
         if(!App.IsSandbox&&OnlineUpdater.Enabled)_=CheckOnlineUpdateAsync(false);
@@ -1345,12 +1363,17 @@ public partial class MainWindow : Window
         {
             e.Handled=true;UndoLast();return;
         }
+        // Esc 关闭页面：与标题栏 × 走同一条路径，由 OnClosing 统一裁决
+        // （默认隐藏到托盘后台运行；用户开启「关闭时结束进程」时才退出进程）。
+        // 弹出菜单打开时先让菜单自身消费 Esc，避免一次按键同时关菜单又关窗口。
         if(e.Key==Key.Escape && !_dragging)
         {
+            if(_menus>0)return;
             e.Handled=true;
-            if(_settingsVisible){ShowIconsView();return;}
-            if(_catalogVisible){ShowIconsView();return;}
-            if(!KeepOpenForVerification)WindowState=WindowState.Minimized;return;
+            // 从设置 / 图标库子页面退出时先复位到图标页，下次唤起不会停留在旧页面。
+            if(_settingsVisible||_catalogVisible)ShowIconsView();
+            if(!KeepOpenForVerification)Close();
+            return;
         }
         if(e.OriginalSource is not Button button || button.Tag is not NookItem)return;
         if(e.Key==Key.Apps || (e.Key==Key.F10&&Keyboard.Modifiers.HasFlag(ModifierKeys.Shift))){e.Handled=true;ShowIconMenu(button,(NookItem)button.Tag);return;}
