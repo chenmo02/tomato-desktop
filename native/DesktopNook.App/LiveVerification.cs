@@ -10,7 +10,7 @@ internal static class LiveVerification
     {
         Directory.CreateDirectory(root);var checks=new List<string>();var failure="";
         var desktop=Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory);
-        var data=Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"DesktopNook");
+        var data=ApplicationPaths.RegisteredData;
         var before=File.Exists(Path.Combine(data,"state.json"))?NookStore.HashFile(Path.Combine(data,"state.json")):"";
         var bin=new WindowsRecycleBin();var snapshot=bin.Capture();
         File.WriteAllText(Path.Combine(root,"recycle-original.json"),JsonSerializer.Serialize(snapshot));
@@ -20,7 +20,7 @@ internal static class LiveVerification
         {
             store=new(Path.Combine(root,"Data"),[desktop],bin);
             foreach(var pending in store.State.Items.ToArray())store.Restore(pending.Id,true);
-            var backup=Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"DesktopNook.LiveBackup-"+Guid.NewGuid().ToString("N"));
+            var backup=Path.Combine(Path.GetDirectoryName(data)!,"live-backup-"+Guid.NewGuid().ToString("N"));
             foreach(var file in Directory.EnumerateFiles(data,"*",SearchOption.AllDirectories)){var copy=Path.Combine(backup,Path.GetRelativePath(data,file));Directory.CreateDirectory(Path.GetDirectoryName(copy)!);File.Copy(file,copy,false);}
             checks.Add("Existing user configuration and vault backed up on same filesystem");
             dynamic shell=Activator.CreateInstance(Type.GetTypeFromProgID("WScript.Shell")!)!;dynamic link=shell.CreateShortcut(source);

@@ -160,21 +160,20 @@ public partial class MainWindow : Window
         // 默认打开第一个自定义分类（「未分类」固定末尾，不作为默认视图）；
         // 无自定义分类时回退到「全部」。用户手动切回「全部」后不会被强制改回。
         _activeCategory=Store.State.Categories.FirstOrDefault(c=>c.Id!="uncategorized")?.Id;
-        Render();
     }
     // 置顶开关唯一的应用点：启动、设置变更、导入配置包与自检都走这里，
     // 避免 XAML 静态值与用户偏好各自维护一份状态。
     internal void ApplyTopmost()=>Topmost=Settings.AlwaysOnTop;
-    // 任务栏按钮图标取自窗口 Icon。XAML 用 PNG 作保底，避免图标资源异常时任务栏
-    // 退回默认的空白文档图标；这里优先换成标准 DIB 多尺寸 ICO，保证不同 DPI 下清晰。
+    // 任务栏优先使用多尺寸 ICO，资源异常时用共享的品牌图标兜底。
     private void ApplyWindowIcon()
     {
         try
         {
             var frame=BitmapFrame.Create(new Uri("pack://application:,,,/Assets/AppIcon.ico",UriKind.Absolute),BitmapCreateOptions.None,BitmapCacheOption.OnLoad);
-            if(frame.PixelWidth>0)Icon=frame;
+            if(frame.PixelWidth>0){Icon=frame;return;}
         }
-        catch{/* ICO 资源不可用时沿用 XAML 指定的 PNG 图标 */}
+        catch{/* ICO 资源不可用时使用 PNG */}
+        Icon=ShellIntegration.AppIcon;
     }
     private const int WmSize=0x0005,WmWindowPosChanged=0x0047,WmDpiChanged=0x02E0;
     // WM_DPICHANGED 由 WPF 转成 DpiChanged 事件，但 WPF 是在同一条消息里稍后才
@@ -265,32 +264,30 @@ public partial class MainWindow : Window
         // 开机自启时窗口初始就是最小化，StateChanged 未必在 Show() 前触发；
         // 显式同步一次挂起状态，保证「启动即驻留后台」这条路径同样不保留大对象。
         if(WindowState==WindowState.Minimized)SuspendIdleResources();
-        // 失效检测放到后台优先级，不占用首次显示；解析快捷方式需要 UI 线程 STA。
-        Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Background,new Action(ScanBroken));
-        // 启动与数据变更只同步展示目录里的快捷方式；「固定到快速访问」由安装流程
-        // --maintenance=shortcut 完成，避免每次启动都改写用户的资源管理器设置。
-        // 安装时 Shell 固定最多等 2.5 秒，超时会留报告；这里用独立 STA 后台线程补做一次，
-        // 既不阻塞 UI，也不让安装器一直等资源管理器。
-        Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Background,new Action(()=>
+        Render();
+        _=ScanBrokenAsync();
+        // 安装后首次启动时在后台完成快速访问固定；旧版安装超时的记录也在这里补做。
+        if(!App.IsSandbox)
         {
-            try{ExplorerNavService.Sync(Store.DataDirectory,Store);}catch{}
-            if(App.IsSandbox)return;
+            var dataDirectory=Store.DataDirectory;
             var retry=new Thread(()=>
             {
                 try
                 {
-                    var report=Path.Combine(Store.DataDirectory,"nav-pin-report.json");
-                    if(!File.Exists(report))return;
-                    var text=File.ReadAllText(report);
-                    if(!text.Contains("\"status\":\"timeout\"")&&!text.Contains("\"status\":\"pending\""))return;
-                    var pinned=ExplorerNavService.Register(Store.DataDirectory,Store);
-                    File.WriteAllText(report,ExplorerNavService.Diagnose(Store.DataDirectory,pinned));
+                    var report=Path.Combine(dataDirectory,"nav-pin-report.json");
+                    if(File.Exists(report))
+                    {
+                        var text=File.ReadAllText(report);
+                        if(!text.Contains("\"status\":\"timeout\"")&&!text.Contains("\"status\":\"pending\""))return;
+                    }
+                    var pinned=ExplorerNavService.PinFolder(dataDirectory,true);
+                    File.WriteAllText(report,ExplorerNavService.Diagnose(dataDirectory,pinned));
                 }
                 catch{}
             }){IsBackground=true};
             retry.SetApartmentState(System.Threading.ApartmentState.STA);
             retry.Start();
-        }));
+        }
         if(Store.RecoveryMessages.Count>0) SetStatus(Store.RecoveryMessages.Last());
         if(!App.IsSandbox&&OnlineUpdater.Enabled)_=CheckOnlineUpdateAsync(false);
         // TEMP layout probe (removed after diagnosis)
@@ -424,10 +421,9 @@ public partial class MainWindow : Window
         if(!_settingsLoaded){BuildSettings();_settingsLoaded=true;}
         ShowSettingsView();
     }
-    // 面板长期驻留后台时，只保留「随时能被唤起」所需的状态：释放玻璃壁纸位图、
-    // 模糊背景层、「全部图标」页上百个卡片控件和图标缓存里的冷门尺寸。收纳数据、
-    // 分类、窗口位置与设置全部保留；恢复显示时按原路径重建，不改变交互语义。
+    // 挂起时释放背景和两个图标页的控件，唤起时按当前分类和搜索条件恢复。
     private bool _resourcesSuspended;
+    private double _iconScrollOffset;
     internal bool ResourcesSuspended=>_resourcesSuspended;
     private void SuspendIdleResources()
     {
@@ -436,14 +432,19 @@ public partial class MainWindow : Window
         _resourcesSuspended=true;
         ReleaseBackdropVisuals();
         ReleaseCatalogVisuals();
-        ShellIntegration.TrimForIdle();
+        _iconScrollOffset=IconsScroll.VerticalOffset;
+        Icons.ItemsSource=null;
+        ShellIntegration.SetIconCacheBackground(true);
         _autoCollect?.SetBackgroundMode(true);
     }
     private void ResumeIdleResources()
     {
         if(!_resourcesSuspended)return;
         _resourcesSuspended=false;
+        ShellIntegration.SetIconCacheBackground(false);
         _autoCollect?.SetBackgroundMode(false);
+        RefreshIcons();
+        IconsScroll.ScrollToVerticalOffset(_iconScrollOffset);
         // 背景层同步恢复：面板重新可见的第一帧就应该是正确的皮肤，不留空白帧。
         RestoreBackdropVisuals();
         // 图标库卡片可能有上百个，放到后台优先级重建，避免挡住面板打开。
@@ -578,23 +579,42 @@ public partial class MainWindow : Window
     }
     // 数据变更后合并成一次资源管理器入口同步，收纳 / 移回 / 改名 / 分类变化都能跟上。
     private DispatcherTimer? _navSyncTimer;
+    private bool _navSyncRunning, _navSyncPending;
     private void ScheduleNavSync()
     {
+        _navSyncPending=true;
+        if(_navSyncRunning)return;
         if(_navSyncTimer is null)
         {
             _navSyncTimer=new DispatcherTimer(DispatcherPriority.Background){Interval=TimeSpan.FromMilliseconds(400)};
-            _navSyncTimer.Tick+=(_,_)=>
-            {
-                _navSyncTimer.Stop();
-                try{ExplorerNavService.Sync(Store.DataDirectory,Store);}catch{}
-            };
+            _navSyncTimer.Tick+=SyncNavigation;
         }
         _navSyncTimer.Stop();_navSyncTimer.Start();
+    }
+
+    private async void SyncNavigation(object? sender,EventArgs e)
+    {
+        _navSyncTimer!.Stop();
+        _navSyncRunning=true;
+        _navSyncPending=false;
+        try
+        {
+            var dataDirectory=Store.DataDirectory;
+            var items=ShellIntegration.SnapshotCollectedItems(Store);
+            await ShellIntegration.RunStaAsync(()=>ExplorerNavService.Sync(dataDirectory,items));
+        }
+        catch{}
+        finally
+        {
+            _navSyncRunning=false;
+            if(_navSyncPending&&!_exitRequested)ScheduleNavSync();
+        }
     }
     // 侧边栏选中的分类始终作为右侧内容标题；搜索只过滤显示，不改变收纳数据。
     // 图标一律按 ItemsSource 顺序交给 UniformGrid 排成紧凑网格，不再保存自由坐标。
     private void RefreshIcons()
     {
+        if(_resourcesSuspended)return;
         var name=_activeCategory is null?"全部":Store.State.Categories.FirstOrDefault(c=>c.Id==_activeCategory)?.Name??"全部";
         var query=_iconFilter;
         var visible=Store.State.Items

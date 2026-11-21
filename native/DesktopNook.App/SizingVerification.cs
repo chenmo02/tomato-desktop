@@ -172,10 +172,14 @@ internal static class SizingVerification
             if(window.Tray is null||!window.Tray.Visible)throw new Exception("通知区图标未创建。");
             Check(window.Tray.MenuLabels.Contains("退出并结束进程"),"托盘右键菜单提供退出入口");
             var widthBefore=window.Width;var heightBefore=window.Height;
+            window.KeepOpenForVerification=false;
             window.HideToTray();
             Check(!window.IsVisible&&window.Tray?.IsBackground==true,"点 × 后窗口隐藏且托盘显示后台状态");
+            window.Render();await Layout();
+            Check(window.ResourcesSuspended&&window.Icons.ItemsSource is null,"托盘后台刷新不会重建收纳图标");
             window.ShowPanel();await Layout();
             Check(window.IsVisible&&window.Tray?.IsBackground==false,"托盘唤起恢复窗口");
+            Check(window.VisibleCount==ids.Count&&window.IconPositions().Count==ids.Count,"托盘唤起重新构建当前分类的图标");
             Check(Math.Abs(window.Width-widthBefore)<.01&&Math.Abs(window.Height-heightBefore)<.01,"托盘后台往返不改变窗口尺寸");
         }
         catch(Exception ex){failure=ex.ToString();}

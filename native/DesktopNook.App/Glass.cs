@@ -78,6 +78,9 @@ public partial class MainWindow
     private string? _skinWallpaperPath;
     private BitmapSource? _skinWallpaperImage;
     private ImageBrush? _skinWallpaperBrush;
+    private Task _wallpaperRefresh=Task.CompletedTask;
+    private bool _wallpaperRefreshRequested;
+    internal Task WallpaperRefreshCompletion=>_wallpaperRefresh;
 
     // 背景分层的可见部分在 XAML（单层不透明底）；这里负责 Mica 色调刷新，
     // 并让圆角裁剪跟随 Surface 尺寸（自由调整窗口大小时宽高会实时变化）。
@@ -89,8 +92,7 @@ public partial class MainWindow
         LocationChanged+=(_,_)=>UpdateSkinBackdropViewbox();
         DpiChanged+=(_,_)=>UpdateSkinBackdropViewbox();
         UpdateGlassClip();
-        // 壁纸解码与九点取色放到窗口显示后的后台优先级：不占用启动路径，
-        // 避免拖慢首次显示，也不干扰窗口激活与真实鼠标拖动时序。
+        // 窗口先用默认背景，读取壁纸与解码在后台线程完成。
         Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Background,new Action(RefreshGlassWallpaper));
         // 壁纸更换、系统透明效果开关或视觉样式变化：重算 DWM 背板状态并刷新背景层。
         // 用户在 Windows 设置里打开「透明效果」后无需重启即可切到真·Acrylic。
@@ -151,24 +153,51 @@ public partial class MainWindow
     private void RefreshGlassWallpaper()
     {
         if(_resourcesSuspended)return;
-        var path=GlassBackdrop.WallpaperPath();
         if(ThemeService.IsGlass)
         {
-            // 壁纸路径没变且背景层已建好时直接复用；深浅主题切换时 ApplySettings
-            // 会清空 _glassWallpaper，强制用新的浅/深光斑重建。
-            if(string.Equals(path,_glassWallpaper,StringComparison.OrdinalIgnoreCase)&&SkinBackdrop.Children.Count>0)return;
-            RebuildSkinBackdrop(path);
-            return;
+            if(BackdropService.AcrylicVisible)
+            {
+                _skinWallpaperPath=null;
+                _skinWallpaperImage=null;
+                RebuildSkinBackdrop();
+                return;
+            }
+            if(SkinBackdrop.Children.Count==0)RebuildSkinBackdrop();
         }
-        if(path is null)
+        _wallpaperRefreshRequested=true;
+        if(_wallpaperRefresh.IsCompleted)_wallpaperRefresh=LoadWallpaperAsync();
+    }
+
+    private async Task LoadWallpaperAsync()
+    {
+        while(_wallpaperRefreshRequested&&!_resourcesSuspended)
         {
-            if(_glassWallpaper is null)return;
-            _glassWallpaper=null;ApplyMica(null);return;
+            _wallpaperRefreshRequested=false;
+            var glass=ThemeService.IsGlass;
+            if(glass&&BackdropService.AcrylicVisible)return;
+            var previousPath=glass?_skinWallpaperPath:_glassWallpaper;
+            var needsImage=glass&&_skinWallpaperImage is null;
+            var result=await Task.Run(() =>
+            {
+                var path=GlassBackdrop.WallpaperPath();
+                var changed=!string.Equals(path,previousPath,StringComparison.OrdinalIgnoreCase)||(needsImage&&path is not null);
+                var image=changed&&path is not null?GlassBackdrop.Load(path):null;
+                return (path,changed,image,tint:!glass&&image is not null?GlassBackdrop.AverageColor(image):null);
+            });
+            if(_resourcesSuspended||_wallpaperRefreshRequested||glass!=ThemeService.IsGlass||
+               (glass&&BackdropService.AcrylicVisible)||!result.changed)continue;
+            if(glass)
+            {
+                _skinWallpaperPath=result.path;
+                _skinWallpaperImage=result.image;
+                RebuildSkinBackdrop();
+            }
+            else
+            {
+                _glassWallpaper=result.path;
+                ApplyMica(result.tint);
+            }
         }
-        if(string.Equals(path,_glassWallpaper,StringComparison.OrdinalIgnoreCase))return;
-        var image=GlassBackdrop.Load(path);
-        _glassWallpaper=path;
-        ApplyMica(image is null?null:GlassBackdrop.AverageColor(image));
     }
 
     // 切换 DWM 系统背板：玻璃皮肤用实时 Acrylic，原生皮肤用 Mica。
@@ -209,8 +238,8 @@ public partial class MainWindow
     internal void RestoreBackdropVisuals()
     {
         if(_resourcesSuspended)return;
-        if(ThemeService.IsGlass){RebuildSkinBackdrop();UpdateSkinBackdropViewbox();}
-        else RefreshGlassWallpaper();
+        RefreshGlassWallpaper();
+        UpdateSkinBackdropViewbox();
     }
 
     // 皮肤几何与背景层：色板由 ThemeService 整表替换，这里只处理画刷无法表达的形态差异。
@@ -242,10 +271,10 @@ public partial class MainWindow
         Surface.Effect=glass
             ?new DropShadowEffect{BlurRadius=30,ShadowDepth=5,Opacity=.26,Color=Color.FromRgb(0x3A,0x3A,0x72),RenderingBias=RenderingBias.Performance}
             :null;
-        if(glass){if(rebuildBackdrop)RebuildSkinBackdrop();}
+        if(glass){if(rebuildBackdrop){RebuildSkinBackdrop();RefreshGlassWallpaper();}}
         else
         {
-            SkinBackdrop.Children.Clear();
+            ReleaseBackdropVisuals();
             // 回到原生皮肤时强制让静态 Mica 重新取色，恢复原来的壁纸色调行为。
             _glassWallpaper=null;
         }
@@ -323,23 +352,14 @@ public partial class MainWindow
     }
 
     // 玻璃背景层只在切换皮肤、深浅主题或壁纸时重建，不进入每帧渲染路径。
-    private void RebuildSkinBackdrop(string? path=null)
+    private void RebuildSkinBackdrop()
     {
         if(_resourcesSuspended)return;
-        path??=GlassBackdrop.WallpaperPath();
-        if(!string.Equals(path,_skinWallpaperPath,StringComparison.OrdinalIgnoreCase)||_skinWallpaperImage is null)
-        {
-            _skinWallpaperImage=path is null?null:GlassBackdrop.Load(path);
-            _skinWallpaperPath=path;
-        }
-        _glassWallpaper=path;
         // Acrylic 真正可见时不再铺自绘壁纸图，让 DWM 的实时模糊从透明客户区透出来；
         // 只保留彩色光斑与顶部高光作为玻璃质感叠加。回退状态则完整使用壁纸对齐层。
         var acrylic=BackdropService.AcrylicVisible;
-        var useWallpaper=!acrylic;
-        var image=useWallpaper?_skinWallpaperImage:null;
-        var viewbox=useWallpaper?CurrentWallpaperViewbox():null;
         SkinBackdrop.Children.Clear();
-        SkinBackdrop.Children.Add(SkinService.BuildBackdrop(ThemeService.IsDark,image,viewbox,acrylic,out _skinWallpaperBrush));
+        SkinBackdrop.Children.Add(SkinService.BuildBackdrop(ThemeService.IsDark,acrylic?null:_skinWallpaperImage,
+            acrylic?null:CurrentWallpaperViewbox(),acrylic,out _skinWallpaperBrush));
     }
 }

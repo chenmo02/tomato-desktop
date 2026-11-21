@@ -1,10 +1,10 @@
-# 番茄桌面 <small>DesktopNook</small>
+# 番茄桌面 <small>TomatoDesktop</small>
 
 <img src="native/DesktopNook.App/Assets/AppIcon.png" width="108" align="right" alt="番茄桌面图标">
 
 **只收纳你选中的桌面图标，其余照旧留在桌面。** 番茄桌面是一个运行于 Windows 的桌面收纳工具：把快捷方式、文件或文件夹「喂给番茄」，之后从任务栏上的同一个入口按分类打开；需要时，一键把项目移回桌面。
 
-![版本](https://img.shields.io/badge/version-1.5.2-blue) ![平台](https://img.shields.io/badge/platform-Windows%2010%2F11%20x64-0078D6?logo=windows) ![框架](https://img.shields.io/badge/.NET-10-512BD4?logo=dotnet) ![许可证](https://img.shields.io/badge/license-not%20specified-lightgrey)
+![版本](https://img.shields.io/badge/version-1.5.3-blue) ![平台](https://img.shields.io/badge/platform-Windows%2010%2F11%20x64-0078D6?logo=windows) ![框架](https://img.shields.io/badge/.NET-10-512BD4?logo=dotnet) ![许可证](https://img.shields.io/badge/license-not%20specified-lightgrey)
 
 [Releases](https://github.com/chenmo02/tomato-desktop/releases) · [使用说明](docs/使用说明.md) · [架构与数据](docs/架构与数据.md) · [开发与构建](docs/开发与构建.md) · [打包与发布](docs/打包与发布.md) · [反馈问题](https://github.com/chenmo02/tomato-desktop/issues)
 
@@ -31,7 +31,7 @@
 - **可撤销与可恢复**：收纳、移回、分类与排序改动进入最近 20 步撤销栈，操作日志保留 30 天；启动时校验失效快捷方式，可在设置里批量清理。
 - **自动化与偏好**：全局热键 `Ctrl+Alt+T`、按 `Esc` 关闭页面、可选开机自启、自动收纳新桌面图标（面板可见时每 15 秒扫描、收起后降频到 60 秒并在恢复显示时立即补扫，默认关闭）、失焦自动收起（默认关闭）。
 - **托盘后台驻留**：点标题栏 × 或按 Esc 只隐藏窗口、不结束进程，通知区托盘图标常驻；左键 / 双击图标、点击任务栏入口或按热键都能重新打开，右键托盘图标打开与主界面一致的 WinUI 圆角菜单（品牌头、线性图标、快捷键提示，自动跟随浅色 / 深色主题；番茄图标不带彩色底块），可打开面板、打开设置或退出，点击菜单外任意位置即收起。真退出请用托盘右键菜单、「设置 → 关于 → 退出并结束进程」或「更多 → 退出并结束进程」：会先释放托盘图标、全局热键、鼠标钩子与单实例资源，再直接结束进程，任务管理器里不会残留无窗口的后台实例，也不会继续占用程序集文件。确需「关闭时直接退出」可在「设置 → 行为」显式开启（默认关闭，开启后 × 与 Esc 都直接退出进程）。
-- **后台资源控制**：图标解码线程按需启动、空闲 20 秒自动退出；图标位图按 48 MB 预算做 LRU 淘汰；面板最小化或隐藏到托盘时释放玻璃壁纸位图、模糊背景层与「全部图标」页视觉树，恢复显示时按需重建，收纳数据、分类与设置不受影响。
+- **后台资源控制**：图标解码线程按需启动，空闲 20 秒后自动退出。图标缓存预算为前台 48 MiB、后台 4 MiB。面板最小化或隐藏到托盘时释放玻璃背景和两页图标控件，唤起时重建。
 - **统一更新窗口**：本地文件更新与在线更新共用一个 480px 窗口，按状态展示版本迁移、下载进度阶段、数据安全声明与失败重试；校验版本、产品标识与文件后在原位置替换并重启，保留分类、收纳内容和设置。
 
 完整交互说明见 [使用说明](docs/使用说明.md)。
@@ -44,14 +44,14 @@
 
 | 文件 | 用途 |
 | --- | --- |
-| `DesktopNook-Setup.exe` | 安装版；首次安装或覆盖升级，会创建桌面与开始菜单快捷方式 |
+| `TomatoDesktop-Setup.exe` | 安装版；首次安装或覆盖升级，会创建桌面与开始菜单快捷方式 |
 | `SHA256SUMS.txt` | 发行文件的 SHA-256 校验值 |
 
 请从本仓库的 [Releases](https://github.com/chenmo02/tomato-desktop/releases) 下载，附件以页面实际内容为准。若 Releases 暂时没有附件，可按下方「从源码构建」自行生成单文件程序。**Code → Download ZIP 得到的是源码，需要自行构建，不能直接运行。**
 
 ### 2. 首次使用
 
-1. 运行安装版；
+1. 运行安装版，在首页确认程序安装位置，或点「浏览」选择其他文件夹；
 2. 右键任务栏上的「番茄桌面」图标，选择「固定到任务栏」；
 3. 点击该入口打开或收起面板，把要整理的项目拖进来。
 
@@ -81,7 +81,7 @@ cd tomato-desktop
 pwsh -NoProfile -File native/scripts/Build.ps1
 ```
 
-产物为含运行时的 x64 单文件程序 `native/artifacts/win-x64/DesktopNook.exe`。脚本会先生成多尺寸图标并运行核心检查；只需重复打包时可加 `-SkipTests`。
+产物为含运行时的 x64 单文件程序 `native/artifacts/win-x64/TomatoDesktop.exe`。脚本会先生成多尺寸图标并运行核心检查；只需重复打包时可加 `-SkipTests`。
 
 只编译开发版本：
 
@@ -100,19 +100,19 @@ dotnet run --project native/DesktopNook.App -c Release -- --sandbox $profile
 
 ```powershell
 dotnet run --project native/DesktopNook.Tests -c Release -- native/test-results/core.json
-makensis /V2 native/scripts/Installer.nsi   # 需要 Unicode NSIS，输出 native/artifacts/DesktopNook-Setup.exe
+makensis /V2 native/scripts/Installer.nsi   # 需要 Unicode NSIS，输出 native/artifacts/TomatoDesktop-Setup.exe
 ```
 
 完整的测试、安装器与发行步骤见 [开发与构建](docs/开发与构建.md)；从版本号 bump 到发布 Release 的可执行清单见 [打包与发布](docs/打包与发布.md)。原生 UI 自检会短暂操控鼠标，必须在专用隔离目录中运行。`native/scripts/Verify-StartupExit.ps1` 在真实进程上核对启动、单实例、后台驻留与所有真退出入口结束后无残留实例（脚本需 UTF-8 BOM + CRLF，供 Windows PowerShell 5.1 正确读取中文注释）。
 
 ## 数据与备份
 
-> **重要**：收纳会移动真实桌面文件。请通过「移回桌面」或卸载恢复流程取回内容，不要直接删除数据目录、托管目录或跨卷托管内容。
+> **重要**：收纳会移动真实桌面文件。需要取回时请在应用中选择「移回桌面」；数据目录、托管目录及跨卷托管内容用于保留已收纳项目。
 
-- 分类、收纳索引与恢复清单默认保存在 `%LOCALAPPDATA%\DesktopNook`（`state.json`、`migration.json`、`vault/`、`updates/`）；程序本体 `DesktopNook.exe` 与卸载器默认也装在这里，安装向导可自选其它目录，数据目录始终不变。覆盖升级只替换程序文件，不改动数据。
-- 跨卷托管的文件可能位于原桌面同卷的隐藏 `.DesktopNookVault`，只备份 JSON 或默认数据目录不足以覆盖全部实际内容。
+- 程序本体 `TomatoDesktop.exe`、卸载器和 `Data` 位于同一个安装目录，默认是 `%LOCALAPPDATA%\TomatoDesktop`。收纳索引、恢复记录和托管目录位于 `Data\Collection`。从旧版更新请运行新版安装包，首次打开会迁入旧数据并保留原副本。
+- 跨卷托管的文件可能位于原桌面同卷的隐藏 `.TomatoDesktopVault`（旧记录仍可能指向 `.DesktopNookVault`），只备份 JSON 或默认数据目录不足以覆盖全部实际内容。
 - 窗口、主题、自启、置顶与关闭行为等偏好保存在当前 Windows 用户设置；「设置 → 数据与备份」可导出 / 导入 zip 配置包，导入前会自动备份。1.5 起「关闭时结束进程」改由新键保存并默认关闭，旧版本写入的旧值不再被继承，避免点 × 意外退出。
-- 所有数据仅保存在本机，不上传、无云端或跨设备同步；卸载时会先尝试恢复已收纳项目，有失败项时保留程序以便重试，恢复成功后数据目录仍保留，需手动清理。
+- 所有数据仅保存在本机。运行程序目录中的 `卸载番茄桌面.exe` 可卸载程序并移除系统入口。收纳内容、分类和设置保留，重新安装后可继续使用。
 
 细节见 [架构与数据](docs/架构与数据.md)。
 
@@ -142,8 +142,8 @@ native/
 
 ## 项目状态与已知限制
 
-- 当前源码版本 **1.5.2**，基于 WPF / .NET 10（`net10.0-windows`），面向 Windows 10 / 11 x64。
-- **在线更新已启用**：`OnlineUpdater.Repository` 指向 `chenmo02/tomato-desktop`，启动后台检查与「更多 → 检查在线更新」均可用；检查与下载需能访问 GitHub。发布资产必须为 `DesktopNook-Setup.exe`，且 GitHub 返回的 `digest`（`sha256:…`）与 `size` 有效，下载地址须落在该仓库的 `/releases/download/` 路径下，否则检查会拒绝更新而不下载。
+- 当前源码版本 **1.5.3**，基于 WPF / .NET 10（`net10.0-windows`），面向 Windows 10 / 11 x64。
+- **在线更新已启用**：`OnlineUpdater.Repository` 指向 `chenmo02/tomato-desktop`，启动后台检查与「更多 → 检查在线更新」均可用；检查与下载需能访问 GitHub。发布资产必须为 `TomatoDesktop-Setup.exe`，且 GitHub 返回的 `digest`（`sha256:…`）与 `size` 有效，下载地址须落在该仓库的 `/releases/download/` 路径下，否则检查会拒绝更新而不下载。
 - 公共桌面快捷方式与被占用文件受 Windows 权限限制，失败时保留原项目并提示；符号链接、目录联接及未落地的云占位内容暂不按普通文件夹收纳。
 - 图标清晰度受原应用资源限制；跨屏 DPI 切换已由 `--dpi-self-test` 覆盖（窗口圆角区域、内容层与壁纸对齐会随 DPI 重算），但不同显示器缩放组合仍未逐一实机验收。
 - 玻璃拟态皮肤依赖 Windows 11 22621+ 且系统「透明效果」开启，不满足时自动回退到按窗口位置对齐的模糊壁纸层；壁纸对齐按整个虚拟屏幕的物理像素计算，扩展屏摆在左侧（负坐标）时同样有效。

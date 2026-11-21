@@ -3,7 +3,6 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Media;
-using System.Windows.Media.Imaging;
 using DesktopNook.Core;
 
 namespace DesktopNook.App;
@@ -135,7 +134,7 @@ internal sealed class CollectWindow : Window
         if(entries.Count==0)
         {
             var empty=new StackPanel{HorizontalAlignment=HorizontalAlignment.Center,Margin=new Thickness(0,24,0,24)};
-            var glyph=new Image{Source=new BitmapImage(new Uri("pack://application:,,,/Assets/AppIcon.png")),Width=38,Height=38,Opacity=.75};RenderOptions.SetBitmapScalingMode(glyph,BitmapScalingMode.HighQuality);
+            var glyph=new Image{Source=ShellIntegration.AppIcon,Width=38,Height=38,Opacity=.75};RenderOptions.SetBitmapScalingMode(glyph,BitmapScalingMode.HighQuality);
             empty.Children.Add(glyph);
             empty.Children.Add(new TextBlock{Text="没有待收纳的桌面图标",FontSize=10.5,Foreground=DialogPalette.Get("WinTextSecondary"),HorizontalAlignment=HorizontalAlignment.Center,Margin=new Thickness(0,10,0,0)});
             list.Children.Add(empty);

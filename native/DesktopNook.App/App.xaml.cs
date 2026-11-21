@@ -17,7 +17,7 @@ public partial class App : Application
     public static bool IsSandbox { get; private set; }
     internal static StartupOptions Options {get;private set;}=new();
     public static void ReloadStore() => Store = new NookStore(Store.DataDirectory,Store.DesktopRoots,Recycle);
-    private void OnStartup(object sender, StartupEventArgs e)
+    private async void OnStartup(object sender, StartupEventArgs e)
     {
         try
         {
@@ -31,7 +31,7 @@ public partial class App : Application
             var applyIndex=Array.IndexOf(e.Args,"--apply-update");if(applyIndex>=0){Shutdown(LocalUpdater.Apply(e.Args[applyIndex+1]));return;}
             if(e.Args.Contains("--verification-marker") && Array.IndexOf(e.Args,"--sandbox") is var markerIndex && markerIndex>=0)
             {
-                File.WriteAllText(Path.Combine(Path.GetFullPath(e.Args[markerIndex+1]),"shortcut-launched.txt"),"DesktopNook shortcut launch verified");Shutdown();return;
+                File.WriteAllText(Path.Combine(Path.GetFullPath(e.Args[markerIndex+1]),"shortcut-launched.txt"),"TomatoDesktop shortcut launch verified");Shutdown();return;
             }
             ShellIntegration.SetAppId("DesktopNook.DesktopNook");
             var payloadIndex=Array.IndexOf(e.Args,"--verify-payloads");if(payloadIndex>=0){Shutdown(PayloadVerification.Run(Path.GetFullPath(e.Args[payloadIndex+1])));return;}
@@ -39,31 +39,42 @@ public partial class App : Application
             if(liveIndex>=0){var result=LiveVerification.Run(Path.GetFullPath(e.Args[liveIndex+1]));Shutdown(result);return;}
             var sandboxIndex = Array.IndexOf(e.Args, "--sandbox");
             IsSandbox = sandboxIndex >= 0;
-            var root = IsSandbox ? Path.GetFullPath(e.Args[sandboxIndex + 1]) : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "DesktopNook");
-            var signature = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(root.ToUpperInvariant())))[..20];
+            var installedSandbox = IsSandbox && e.Args.Contains("--installed-sandbox");
+            var profile = IsSandbox ? Path.GetFullPath(e.Args[sandboxIndex + 1]) : ApplicationPaths.LegacyData;
+            var dataDirectory = IsSandbox && !installedSandbox ? Path.Combine(profile,"Data") : ApplicationPaths.InstalledData(AppContext.BaseDirectory);
+            var root = IsSandbox ? profile : dataDirectory;
+            // Keep the legacy IPC identity so a renamed installer can stop a running older build.
+            var signature = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(profile.ToUpperInvariant())))[..20];
             if(IsSandbox)Options=new StartupOptions(@"Software\DesktopNook\Sandbox\"+signature+@"\Run",@"Software\DesktopNook\Sandbox\"+signature+@"\Settings");
-            // 安装器用 ExecWait 无限等待维护进程；Shell COM 在资源管理器繁忙时可能永久阻塞。
+            // 安装器同步等待维护进程；Shell COM 在资源管理器繁忙时可能永久阻塞。
             // 这里给每条维护命令一个进程级硬超时，保证安装 / 卸载一定能收尾。
             var maintenance=e.Args.FirstOrDefault(a=>a.StartsWith("--maintenance="));
             if(maintenance is not null)
             {
                 var budget=maintenance=="--maintenance=shortcut"?15000:30000;
-                var finished=new ManualResetEventSlim(false);
-                var watchdog=new Thread(()=>{if(!finished.Wait(budget))Environment.Exit(7);}){IsBackground=true};
+                var watchdog=new Thread(()=>
+                {
+                    Thread.Sleep(budget);
+                    AppExit.FinishMaintenance(7);
+                }){IsBackground=true};
                 watchdog.Start();
-                var code=Maintenance.Run(e.Args,root,signature,IsSandbox);
-                finished.Set();
-                Shutdown(code);return;
+                var code=Maintenance.Run(e.Args,root,dataDirectory,signature,IsSandbox);
+                AppExit.FinishMaintenance(code);
+                return;
             }
             _mutex = new Mutex(true, "Local\\DesktopNook-" + signature, out _ownsMutex);
             _activate = new EventWaitHandle(false, EventResetMode.AutoReset, "Local\\DesktopNook-Activate-" + signature);
             // 副本实例只负责唤醒已有面板，然后必须立刻结束进程。用进程级硬退出，
             // 避免 Shutdown() 在某些托盘/消息钩子状态下留下无窗口的僵尸进程。
             if (!_ownsMutex) { if(!e.Args.Contains("--autostart"))_activate.Set(); CleanupIpc(); AppExit.Exit(0); return; }
+            var followInstallation = installedSandbox || !IsSandbox && ApplicationPaths.IsRegisteredData(dataDirectory);
+            if(followInstallation)
+                await PrepareInstalledData(dataDirectory, IsSandbox ? Path.Combine(profile,"Data") : ApplicationPaths.LegacyData);
             var desktops = IsSandbox ? new[] { Path.Combine(root, "Desktop") } : new[] { Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory), Environment.GetFolderPath(Environment.SpecialFolder.CommonDesktopDirectory) };
             if (IsSandbox) Directory.CreateDirectory(desktops[0]);
             Recycle = IsSandbox ? new SandboxRecycle(root) : new WindowsRecycleBin();
-            Store = new NookStore(IsSandbox ? Path.Combine(root, "Data") : root, desktops, Recycle);
+            Store = new NookStore(dataDirectory, desktops, Recycle);
+            if(followInstallation)Options.RememberDataDirectory(dataDirectory);
             // 背板启动自检固定以玻璃皮肤冷启动：默认皮肤是 native，那样测不到
             // 「Acrylic 声明失败 → 自绘不透明渐变层盖住背板」这条路径。
             if(IsSandbox&&e.Args.Contains("--backdrop-self-test"))
@@ -80,21 +91,21 @@ public partial class App : Application
             _stop=new EventWaitHandle(false,EventResetMode.AutoReset,"Local\\DesktopNook-Stop-"+signature);
             _stopWait=ThreadPool.RegisterWaitForSingleObject(_stop,(_,_)=>Dispatcher.BeginInvoke(()=>window.QuitForMaintenance()),null,Timeout.Infinite,false);
             _activateWait=ThreadPool.RegisterWaitForSingleObject(_activate, (_, _) => Dispatcher.BeginInvoke(() => window.TogglePanel()), null, Timeout.Infinite, false);
-            var readyIndex=Array.IndexOf(e.Args,"--update-ready");if(readyIndex>=0)Dispatcher.BeginInvoke(()=>File.WriteAllText(e.Args[readyIndex+1],System.Text.Json.JsonSerializer.Serialize(new{version=System.Reflection.Assembly.GetExecutingAssembly().GetName().Version!.ToString(),pid=Environment.ProcessId})),System.Windows.Threading.DispatcherPriority.Loaded);
+            var readyIndex=Array.IndexOf(e.Args,"--update-ready");if(readyIndex>=0)_=Dispatcher.BeginInvoke(()=>File.WriteAllText(e.Args[readyIndex+1],System.Text.Json.JsonSerializer.Serialize(new{version=System.Reflection.Assembly.GetExecutingAssembly().GetName().Version!.ToString(),pid=Environment.ProcessId})),System.Windows.Threading.DispatcherPriority.Loaded);
             DispatcherUnhandledException += (_, args) => { args.Handled = true; window.ShowFailure(args.Exception); };
             var catalogUi=Array.IndexOf(e.Args,"--verify-catalog-ui");
-            if(catalogUi>=0)Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Loaded,new Action(async()=>await CatalogVerification.RunUi(window,Path.GetFullPath(e.Args[catalogUi+1]))));
+            if(catalogUi>=0)_=Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Loaded,new Action(async()=>await CatalogVerification.RunUi(window,Path.GetFullPath(e.Args[catalogUi+1]))));
             var iconClick=Array.IndexOf(e.Args,"--verify-icon-click");
-            if(iconClick>=0)Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Loaded,new Action(async()=>await NativeVerification.RunIconClick(window,root,Path.GetFullPath(e.Args[iconClick+1]))));
-            if (e.Args.Contains("--ui-self-test")) Dispatcher.BeginInvoke(async () => await NativeVerification.Run(window, root), System.Windows.Threading.DispatcherPriority.Loaded);
-            if (e.Args.Contains("--size-self-test")) Dispatcher.BeginInvoke(async () => await SizingVerification.Run(window, root), System.Windows.Threading.DispatcherPriority.Loaded);
-            if (e.Args.Contains("--dpi-self-test")) Dispatcher.BeginInvoke(async () => await DpiVerification.Run(window, root), System.Windows.Threading.DispatcherPriority.Loaded);
-            if (e.Args.Contains("--backdrop-self-test")) Dispatcher.BeginInvoke(async () => await BackdropVerification.Run(window, root), System.Windows.Threading.DispatcherPriority.Background);
+            if(iconClick>=0)_=Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Loaded,new Action(async()=>await NativeVerification.RunIconClick(window,root,Path.GetFullPath(e.Args[iconClick+1]))));
+            if (e.Args.Contains("--ui-self-test")) _=Dispatcher.BeginInvoke(async () => await NativeVerification.Run(window, root), System.Windows.Threading.DispatcherPriority.Loaded);
+            if (e.Args.Contains("--size-self-test")) _=Dispatcher.BeginInvoke(async () => await SizingVerification.Run(window, root), System.Windows.Threading.DispatcherPriority.Loaded);
+            if (e.Args.Contains("--dpi-self-test")) _=Dispatcher.BeginInvoke(async () => await DpiVerification.Run(window, root), System.Windows.Threading.DispatcherPriority.Loaded);
+            if (e.Args.Contains("--backdrop-self-test")) _=Dispatcher.BeginInvoke(async () => await BackdropVerification.Run(window, root), System.Windows.Threading.DispatcherPriority.Background);
             // 托盘「退出并结束进程」端到端探针：先把窗口收进托盘，再从真实右键菜单里
             // 触发退出项的 Click。父脚本以「进程在超时前退出 + 标记文件存在」判定成功，
             // 这样能覆盖 Shutdown() 留下无窗口僵尸进程的旧问题。
             if(IsSandbox&&e.Args.Contains("--verify-tray-exit"))
-                Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Loaded,new Action(async()=>
+                _=Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Loaded,new Action(async()=>
                 {
                     await Task.Delay(500);
                     File.WriteAllText(Path.Combine(root,"tray-exit-requested.txt"),Environment.ProcessId.ToString());
@@ -106,6 +117,32 @@ public partial class App : Application
                 }));
         }
         catch (Exception ex) { MessageBox.Show("番茄桌面暂时无法打开。原文件和数据均保留。\n\n" + ex.Message, "番茄桌面", MessageBoxButton.OK, MessageBoxImage.Error); Shutdown(1); }
+    }
+
+    private static async Task PrepareInstalledData(string destination, string legacy)
+    {
+        var remembered = Options.ReadDataDirectory();
+        var operation = Task.Run(() =>
+        {
+            if (remembered is not null && !Directory.Exists(remembered) && !Directory.Exists(destination))
+                throw new IOException("之前的收纳数据目录不可用，请连接原磁盘后重试。");
+            ApplicationPaths.PrepareData(destination, remembered ?? legacy);
+        });
+        Window? progress = null;
+        if (await Task.WhenAny(operation, Task.Delay(500)) != operation)
+        {
+            progress = new Window
+            {
+                Title = "番茄桌面",
+                WindowStartupLocation = WindowStartupLocation.CenterScreen,
+                SizeToContent = SizeToContent.WidthAndHeight,
+                ResizeMode = ResizeMode.NoResize,
+                Content = new System.Windows.Controls.TextBlock { Text = "正在将收纳数据迁入程序目录，请稍候…", Margin = new Thickness(28), FontSize = 15 }
+            };
+            progress.Show();
+        }
+        try { await operation; }
+        finally { progress?.Close(); }
     }
     protected override void OnExit(ExitEventArgs e)
     {

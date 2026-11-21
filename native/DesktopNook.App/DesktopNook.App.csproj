@@ -2,7 +2,7 @@
   <PropertyGroup>
     <!-- UseWindowsForms 仅为 System.Windows.Forms.NotifyIcon（通知区图标与右键菜单），窗口本身仍是纯 WPF。 -->
     <OutputType>WinExe</OutputType><TargetFramework>net10.0-windows</TargetFramework><UseWPF>true</UseWPF><UseWindowsForms>true</UseWindowsForms>
-    <AssemblyName>DesktopNook</AssemblyName><RootNamespace>DesktopNook.App</RootNamespace><Version>1.5.2</Version><Product>番茄桌面</Product>
+    <AssemblyName>TomatoDesktop</AssemblyName><RootNamespace>DesktopNook.App</RootNamespace><Version>1.5.3</Version><Product>番茄桌面</Product>
     <ApplicationIcon>Assets\AppIcon.ico</ApplicationIcon><ApplicationManifest>app.manifest</ApplicationManifest>
   </PropertyGroup>
   <ItemGroup><ProjectReference Include="..\DesktopNook.Core\DesktopNook.Core.csproj" /><Resource Include="Assets\AppIcon.png" /><Resource Include="Assets\AppIcon.ico" /></ItemGroup>

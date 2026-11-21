@@ -21,6 +21,7 @@ internal static class ResourceVerification
             var before=ShellIntegration.Snapshot();
             Check(before.ActiveWorkers==0,"图标解码线程按需启动，空闲时不常驻");
             Check(before.CacheBudget>0&&before.CacheBytes<=before.CacheBudget,"图标缓存设有字节预算");
+            Check(ShellIntegration.AppIcon is BitmapSource { PixelWidth: 192, IsFrozen: true },"小尺寸品牌标识共享缩小后的位图");
 
             // 8×8 的固定小位图：LRU 淘汰结果可精确预期，不依赖 AppIcon 的实际尺寸。
             var pixel=new byte[8*8*4];
@@ -32,10 +33,16 @@ internal static class ResourceVerification
             Check(cache.Bytes<=cache.Budget,"缓存占用不超过预算");
             Check(cache.TryGet("probe-59",out _),"最近使用的条目仍在缓存中");
             Check(!cache.TryGet("probe-0",out _),"最久未用的条目已淘汰");
-            cache.TrimForIdle(0);
-            Check(cache.Count==0&&cache.Bytes==0,"面板收起时缓存可收缩到零");
+            cache.SetBudget(4096);
+            Check(cache.Count==4&&cache.Bytes==4096,"下调预算时立即淘汰旧图标");
+            for(int i=60;i<80;i++)cache.Add("probe-"+i,sample);
+            Check(cache.Count==4&&cache.Bytes==4096,"解码结果继续入缓存时仍遵守较低的预算");
+            cache.Clear();
+            Check(cache.Count==0&&cache.Bytes==0,"缓存可以完全清空");
 
             // 真实队列：一个不存在的临时路径会让 Shell 调用立即失败，不会触碰桌面。
+            ShellIntegration.SetIconCacheBackground(true);
+            Check(ShellIntegration.Snapshot().CacheBudget==IconCache.BackgroundBudget,"面板收起时启用后台缓存预算");
             ShellIntegration.SetWorkerIdleForVerification(TimeSpan.FromMilliseconds(600));
             var probePath=Path.Combine(Path.GetTempPath(),"desktopnook-resource-probe-missing.lnk");
             ShellIntegration.EnqueueForVerification(new IconJob(probePath,"resource-probe",16,false));
@@ -47,9 +54,10 @@ internal static class ResourceVerification
             while(DateTime.UtcNow<deadline&&ShellIntegration.Snapshot().ActiveWorkers>0)
                 System.Threading.Thread.Sleep(20);
             Check(ShellIntegration.Snapshot().ActiveWorkers==0,"解码线程空闲后自动退出");
-            ShellIntegration.TrimForIdle(0);
             var after=ShellIntegration.Snapshot();
-            Check(after.CacheCount==0&&after.CacheBytes==0,"挂起态图标缓存可以完全释放");
+            Check(after.CacheBytes<=after.CacheBudget,"挂起态完成解码后仍遵守后台缓存预算");
+            ShellIntegration.SetIconCacheBackground(false);
+            Check(ShellIntegration.Snapshot().CacheBudget==before.CacheBudget,"面板恢复后还原前台缓存预算");
 
             var collector=new AutoCollectService(()=>throw new InvalidOperationException("资源自检不扫描桌面"),_=>{});
             Check(collector.ScanInterval==TimeSpan.FromSeconds(15),"面板可见时自动收纳保持 15 秒间隔");

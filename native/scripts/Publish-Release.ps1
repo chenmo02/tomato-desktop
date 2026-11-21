@@ -16,7 +16,7 @@ if($exeInfo.ProductName -ne '番茄桌面' -or $setupInfo.ProductName -ne '番�
 $tag='v'+$version
 $stage=Join-Path $PSScriptRoot ('..\artifacts\github-release\'+$tag)
 New-Item -ItemType Directory -Path $stage -Force | Out-Null
-$setup=Join-Path $stage 'DesktopNook-Setup.exe'
+$setup=Join-Path $stage 'TomatoDesktop-Setup.exe'
 Copy-Item -LiteralPath $Installer -Destination $setup -Force
 $hashes=@($setup)|ForEach-Object{(Get-FileHash -LiteralPath $_ -Algorithm SHA256).Hash.ToLowerInvariant()+'  '+[IO.Path]::GetFileName($_)}
 $checksum=Join-Path $stage 'SHA256SUMS.txt'
@@ -30,10 +30,10 @@ $readme=@'
 
 打开本仓库的 Releases，下载最新正式版：
 
-- `DesktopNook-Setup.exe`：安装版，适合首次安装或覆盖升级。
+- `TomatoDesktop-Setup.exe`：安装版，适合首次安装或覆盖升级。
 - `SHA256SUMS.txt`：发布文件的 SHA-256 校验值。
 
-支持 Windows x64，程序内含运行时，默认安装到 %LOCALAPPDATA%\DesktopNook，也可在安装向导中自选程序安装位置；收纳数据与设置始终保存在 %LOCALAPPDATA%\DesktopNook，不随程序位置改变，无需管理员权限。安装后会自动在后台检查新版本（只提示、不自动安装），也可在“更多 → 检查在线更新”手动检查；发现新版本后可在更新窗口内下载并重启完成升级。也可以手动下载安装包覆盖安装，或使用“更多 → 从本地文件更新…”。首次从旧版本升级，请覆盖安装一次。
+支持 Windows x64，程序内含运行时，默认安装到 %LOCALAPPDATA%\TomatoDesktop。程序、卸载器与 Data 文件夹位于安装向导中选择的目录。选择系统保护目录需要当前账户的管理员授权。首次从旧名称版本升级时，请直接运行新版安装包覆盖安装，首次打开应用会迁入收纳数据。安装后会自动在后台检查新版本，也可在“更多 → 检查在线更新”手动检查。
 
 分类、收纳内容及设置保留在本机；本仓库仅用于发布程序与更新说明，不包含用户数据。下载速度受网络与系统代理设置影响。
 

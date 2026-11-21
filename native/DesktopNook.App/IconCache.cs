@@ -17,6 +17,7 @@ internal readonly record struct IconJob(string Path,string Key,int Pixels,bool F
 internal sealed class IconCache
 {
     internal const long DefaultBudget = 48L*1024*1024;
+    internal const long BackgroundBudget = 4L*1024*1024;
     private sealed class Entry
     {
         public required string Key {get;init;}
@@ -33,7 +34,6 @@ internal sealed class IconCache
     internal long Bytes {get{lock(_gate)return _bytes;}}
     internal int Count {get{lock(_gate)return _map.Count;}}
 
-    // 只用于自检：把预算临时调小，避免为了触发淘汰而真的解码几百张位图。
     internal void SetBudget(long bytes){lock(_gate){_budget=Math.Max(4096,bytes);Trim();}}
 
     internal bool TryGet(string key,out ImageSource image)
@@ -63,17 +63,6 @@ internal sealed class IconCache
                 _map[key]=node;_bytes+=bytes;
             }
             Trim();
-        }
-    }
-
-    // 面板收起时主动收缩到预算的一部分：UI 已经持有当前显示图标的 Source 引用，
-    // 淘汰缓存条目不会让画面变空，只是下次 Refresh 时对冷门尺寸重新解码。
-    internal void TrimForIdle(double fraction=.35)
-    {
-        lock(_gate)
-        {
-            var target=(long)(_budget*Math.Clamp(fraction,0,1));
-            while(_bytes>target&&_lru.Last is { } node)Remove(node);
         }
     }
 

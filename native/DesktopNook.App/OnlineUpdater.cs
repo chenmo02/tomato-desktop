@@ -11,17 +11,17 @@ internal static class OnlineUpdater
 {
     // 在线更新发布仓库（"owner/repo"）。已指向正式发布仓库，Enabled 为 true：
     // 启动后台检查与“更多 → 检查在线更新”均启用。留空即停用，程序不会发起任何请求。
-    // 发布记录必须提供 DesktopNook-Setup.exe、有效的 size 与 sha256 digest，
+    // 发布记录必须提供 TomatoDesktop-Setup.exe、有效的 size 与 sha256 digest，
     // 且下载地址落在本仓库的 /releases/download/ 路径下，否则 Parse / TrustedUrl 会拒绝更新。
     internal const string Repository="chenmo02/tomato-desktop";
-    internal const string AssetName="DesktopNook-Setup.exe";
+    internal const string AssetName="TomatoDesktop-Setup.exe";
     internal static bool Enabled=>!string.IsNullOrWhiteSpace(Repository);
     internal static readonly Uri Latest=new($"https://api.github.com/repos/{Repository}/releases/latest");
     internal static HttpClient CreateClient()
     {
         // HttpClient uses the Windows proxy settings; no account token is shipped.
         var client=new HttpClient{Timeout=TimeSpan.FromMinutes(15)};
-        client.DefaultRequestHeaders.UserAgent.ParseAdd("DesktopNook-Updater/0.8");
+        client.DefaultRequestHeaders.UserAgent.ParseAdd("TomatoDesktop-Updater/0.8");
         return client;
     }
     internal static async Task<OnlineRelease?> CheckAsync(HttpClient client,Version current,CancellationToken token=default)

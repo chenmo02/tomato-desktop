@@ -3,7 +3,6 @@ using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Effects;
-using System.Windows.Media.Imaging;
 
 namespace DesktopNook.App;
 internal static class UiDialogs
@@ -16,7 +15,7 @@ internal static class UiDialogs
         var title=new TextBlock{Text=window.Title,FontSize=15,FontWeight=FontWeights.SemiBold,Foreground=(Brush)Application.Current.FindResource("WinText"),VerticalAlignment=VerticalAlignment.Center};
         if(rich)
         {
-            var icon=new Image{Source=new BitmapImage(new Uri("pack://application:,,,/Assets/AppIcon.png")),Width=26,Height=26,Margin=new Thickness(0,0,10,0)};
+            var icon=new Image{Source=ShellIntegration.AppIcon,Width=26,Height=26,Margin=new Thickness(0,0,10,0)};
             RenderOptions.SetBitmapScalingMode(icon,BitmapScalingMode.HighQuality);
             var texts=new StackPanel{VerticalAlignment=VerticalAlignment.Center};texts.Children.Add(title);
             if(subtitle is not null)texts.Children.Add(new TextBlock{Text=subtitle,FontSize=9.5,Foreground=(Brush)Application.Current.FindResource("WinTextSecondary"),Margin=new Thickness(0,2,0,0)});

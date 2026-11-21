@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="light">
-<title>番茄桌面 DesktopNook · 桌面别摊大饼了</title>
+<title>番茄桌面 TomatoDesktop · 桌面别摊大饼了</title>
 <meta name="description" content="番茄桌面是 Windows 上的桌面收纳工具：点名哪几个图标就只收哪几个，之后从任务栏同一个入口按分类打开，不想要了一键还回桌面。">
 <link rel="icon" type="image/png" href="assets/app-icon.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -388,7 +388,7 @@ section>.wrap{position:relative;z-index:2}
 
 <header class="top">
   <div class="wrap top-in">
-    <a class="mark" href="#top" aria-label="番茄桌面，回到顶部"><img src="assets/app-icon.png" alt="" width="40" height="40">番茄桌面 <small>DesktopNook</small></a>
+    <a class="mark" href="#top" aria-label="番茄桌面，回到顶部"><img src="assets/app-icon.png" alt="" width="40" height="40">番茄桌面 <small>TomatoDesktop</small></a>
     <nav class="mini-nav" id="nav" aria-label="页面导航">
       <a href="#how">怎么玩</a>
       <a href="#skin">长什么样</a>
@@ -538,8 +538,8 @@ section>.wrap{position:relative;z-index:2}
         <div class="note">
           <span class="tape" aria-hidden="true"></span>
           <h2>丑话先说</h2>
-          <p>这程序会真的搬走文件，不是做个快捷方式糊弄你。普通文件和文件夹连内容一起托管，所以别去手删数据目录——要拿回来，走程序里的「移回桌面」或卸载恢复。玻璃皮肤挑系统；公共桌面的快捷方式常常只让读不让写；符号链接、目录联接和没落地的云占位内容先别喂；不同显示器缩放的组合还没一台一台试过。图标好不好看，最后还得看原应用给的资源。</p>
-          <p class="fine">跨卷托管的内容可能藏在原桌面同卷的隐藏 <code>.DesktopNookVault</code>，只备份 JSON 不够；卸载时若有没还回去的项目，会先把程序留着等你重试；反馈问题请附软件版本、Windows 版本、屏幕缩放和复现步骤，别公开上传整个数据目录或含个人路径的原始状态文件。</p>
+          <p>普通文件和文件夹连内容一起托管。需要取回时，在应用里选择「移回桌面」。卸载后会保留收纳数据，重装可继续使用。公共桌面的快捷方式可能需要写入权限，收纳普通文件时请选择本地可用的文件。</p>
+          <p class="fine">跨卷托管的内容可能在原桌面同卷的 <code>.TomatoDesktopVault</code> 或旧版的 <code>.DesktopNookVault</code>。备份时请同时保留实际托管文件。反馈问题请附软件版本、Windows 版本、屏幕缩放和复现步骤。</p>
           <div class="stamps"><span class="stamp">同名<br>会改名</span><span class="stamp">会搬<br>真文件</span><span class="stamp">玻璃<br>挑系统</span></div>
         </div>
       </div>
@@ -556,7 +556,7 @@ section>.wrap{position:relative;z-index:2}
       </div>
       <div class="who-grid">
         <article class="who-card reveal"><h3>图标多到不想数</h3><p>分类自己起、拖着排，搜索框回车直接开第一个。不想收的本来就还在桌面上，不会因为它装了就全给你搬走。</p></article>
-        <article class="who-card reveal"><h3>最怕文件弄丢</h3><p>收纳、移回、改名、排序都能撤销，日志留 30 天；拿回来走「移回桌面」，同名自动改名不覆盖。跨卷内容会藏在 .DesktopNookVault，备份时别忘了它。</p></article>
+        <article class="who-card reveal"><h3>最怕文件弄丢</h3><p>收纳、移回、改名、排序都能撤销，日志保留 30 天。需要取回时选择「移回桌面」，同名文件会自动改名。</p></article>
         <article class="who-card reveal"><h3>爱折腾外观</h3><p>两套皮肤、深浅主题跟系统也能固定；热键、自启、自动收纳、失焦收起默认都能关。窗口拉大拉小，图标尺寸不变。</p></article>
       </div>
     </div>
@@ -576,7 +576,7 @@ section>.wrap{position:relative;z-index:2}
           <span class="cta-dot" aria-hidden="true"></span>
           <span class="cta-dot cta-dot--b" aria-hidden="true"></span>
           <span class="cta-stub-title">你会拿到</span>
-          <code class="cta-file">DesktopNook-Setup.exe</code>
+          <code class="cta-file">TomatoDesktop-Setup.exe</code>
           <span class="cta-info">Windows 10 / 11 x64 · 最新版本与附件以 Releases 页面为准</span>
           <div class="cta-links">
             <a href="https://github.com/chenmo02/tomato-desktop" target="_blank" rel="noopener noreferrer">看源码 ↗</a>
@@ -597,7 +597,7 @@ section>.wrap{position:relative;z-index:2}
 
 <footer class="foot">
   <div class="wrap foot-in">
-    <div class="foot-brand"><img src="assets/app-icon.png" alt="" width="46" height="46"><div>番茄桌面 DesktopNook<small>by chenmo02 · 持续迭代中</small></div></div>
+    <div class="foot-brand"><img src="assets/app-icon.png" alt="" width="46" height="46"><div>番茄桌面 TomatoDesktop<small>by chenmo02 · 持续迭代中</small></div></div>
     <div class="foot-links">
       <a href="https://github.com/chenmo02/tomato-desktop" target="_blank" rel="noopener noreferrer">GitHub</a>
       <a href="https://github.com/chenmo02/tomato-desktop/releases/latest" target="_blank" rel="noopener noreferrer">Releases</a>

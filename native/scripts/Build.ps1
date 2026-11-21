@@ -10,5 +10,5 @@ try {
     }
     dotnet publish DesktopNook.App -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:DebugType=None -p:DebugSymbols=false -o artifacts\win-x64
     if ($LASTEXITCODE -ne 0) { throw 'Publish failed.' }
-    Write-Output (Join-Path $nookRoot 'artifacts\win-x64\DesktopNook.exe')
+    Write-Output (Join-Path $nookRoot 'artifacts\win-x64\TomatoDesktop.exe')
 } finally { Pop-Location }

@@ -4,7 +4,6 @@ using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Input;
 using System.Windows.Media;
-using System.Windows.Media.Imaging;
 using System.Windows.Shapes;
 
 namespace DesktopNook.App;
@@ -89,7 +88,7 @@ internal static class TrayMenu
             Width = 24, Height = 24, Stretch = Stretch.Uniform,
             HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center
         };
-        try { logo.Source = new BitmapImage(new Uri("pack://application:,,,/Assets/AppIcon.png", UriKind.Absolute)); }
+        try { logo.Source = ShellIntegration.AppIcon; }
         catch { /* 资源异常时只留图标占位，菜单功能不受影响 */ }
         badge.Child = logo;
         Grid.SetColumn(badge, 0);

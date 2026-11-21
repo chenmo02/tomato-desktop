@@ -2,7 +2,7 @@ param([string]$Exe)
 Add-Type -AssemblyName UIAutomationClient
 Add-Type -AssemblyName UIAutomationTypes
 Add-Type 'using System;using System.Runtime.InteropServices;public static class NookToggleCheck{[DllImport("user32.dll",CharSet=CharSet.Unicode)]public static extern IntPtr FindWindow(string c,string n);[DllImport("user32.dll")]public static extern bool SetCursorPos(int x,int y);[DllImport("user32.dll")]public static extern bool IsIconic(IntPtr h);[DllImport("user32.dll")]public static extern IntPtr SendMessage(IntPtr h,uint m,IntPtr w,IntPtr l);[DllImport("user32.dll")]public static extern void mouse_event(uint f,uint x,uint y,uint d,UIntPtr e);}'
-$app=Get-Process -Name 'DesktopNook'|Where-Object Path -eq $Exe|Select-Object -First 1
+$app=Get-Process -Name 'TomatoDesktop'|Where-Object Path -eq $Exe|Select-Object -First 1
 $handle=$app.MainWindowHandle
 $tray=[System.Windows.Automation.AutomationElement]::FromHandle([NookToggleCheck]::FindWindow('Shell_TrayWnd',$null))
 $button=$tray.FindFirst([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::AutomationIdProperty,'Appid: DesktopNook.DesktopNook'))

@@ -427,23 +427,45 @@ public partial class MainWindow
 
     private void OnCreateShortcuts(object sender, RoutedEventArgs e) => Run(() => ShortcutInstaller.InstallAll(), "已创建桌面与开始菜单入口");
 
-    private void OnCleanBroken(object sender, RoutedEventArgs e)
+    private bool _cleaningBrokenEntries;
+    private Task<bool>? _brokenScan;
+    private async void OnCleanBroken(object sender, RoutedEventArgs e)
     {
-        ScanBroken();
-        var ids = _brokenIds.Where(id => Store.State.Items.Any(i => i.Id == id)).ToList();
-        if (ids.Count == 0) { SetStatus("没有发现失效入口"); return; }
-        if (UiDialogs.Show(this, "移除 " + ids.Count + " 个失效入口？恢复副本会保留，可按 Ctrl+Z 撤销。", "清理失效入口", MessageBoxButton.OKCancel) != MessageBoxResult.OK) return;
-        var snapshot = ids.Select(id => Store.State.Items.Single(i => i.Id == id)).ToList();
-        foreach (var id in ids) Store.ArchiveItem(id);
-        _undo?.Record("清理 " + ids.Count + " 个失效入口", () => Store.RestoreCatalog(snapshot));
-        _brokenIds.Clear();
-        Render();
-        SetStatus("已移除 " + ids.Count + " 个失效入口，可按 Ctrl+Z 撤销");
+        if (_cleaningBrokenEntries) return;
+        _cleaningBrokenEntries = true;
+        try
+        {
+            SetStatus("正在检查失效入口…");
+            if (!await ScanBrokenAsync()) { SetStatus("失效入口检查未完成，请重试"); return; }
+            var ids = _brokenIds.Where(id => Store.State.Items.Any(i => i.Id == id)).ToList();
+            if (ids.Count == 0) { SetStatus("没有发现失效入口"); return; }
+            if (UiDialogs.Show(this, "移除 " + ids.Count + " 个失效入口？恢复副本会保留，可按 Ctrl+Z 撤销。", "清理失效入口", MessageBoxButton.OKCancel) != MessageBoxResult.OK) return;
+            var snapshot = ids.Select(id => Store.State.Items.Single(i => i.Id == id)).ToList();
+            foreach (var id in ids) Store.ArchiveItem(id);
+            _undo?.Record("清理 " + ids.Count + " 个失效入口", () => Store.RestoreCatalog(snapshot));
+            _brokenIds.Clear();
+            Render();
+            SetStatus("已移除 " + ids.Count + " 个失效入口，可按 Ctrl+Z 撤销");
+        }
+        finally { _cleaningBrokenEntries = false; }
     }
 
-    private void ScanBroken()
+    private Task<bool> ScanBrokenAsync() =>
+        _brokenScan is { IsCompleted: false } ? _brokenScan : _brokenScan = ScanBrokenCoreAsync();
+
+    private async Task<bool> ScanBrokenCoreAsync()
     {
-        try { _brokenIds = ShortcutHealth.Scan(Store); Render(); }
-        catch { /* 单个快捷方式解析失败不影响面板使用 */ }
+        try
+        {
+            var store = Store;
+            var items = ShellIntegration.SnapshotCollectedItems(store);
+            var broken = await ShellIntegration.RunStaAsync(() => ShortcutHealth.Scan(items));
+            if (!ReferenceEquals(store, Store) || !items.SequenceEqual(ShellIntegration.SnapshotCollectedItems(store)))
+                return false;
+            _brokenIds = broken;
+            RefreshIcons();
+            return true;
+        }
+        catch { return false; }
     }
 }

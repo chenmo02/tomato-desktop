@@ -564,6 +564,7 @@ internal static class NativeVerification
             window.ApplyBackdrop();
             window.ApplySkinVisual();
             await window.Dispatcher.InvokeAsync(()=>{},DispatcherPriority.ContextIdle);
+            await window.WallpaperRefreshCompletion.WaitAsync(TimeSpan.FromSeconds(8));
             window.UpdateLayout();
             checks.Add("DWM backdrop: "+BackdropService.Status);
             // 真·Acrylic 生效时，玻璃背景层绝不能再铺不透明底，否则 DWM 背板被整块挡住。

@@ -34,13 +34,18 @@ public sealed class NookStore
     {
         if(!string.IsNullOrEmpty(item.PayloadPath))
         {
-            var expected=LocalPayload(item);if(!string.Equals(Path.GetFullPath(item.PayloadPath),expected,StringComparison.OrdinalIgnoreCase))throw new IOException("托管位置无效。");return expected;
+            var recorded=Path.GetFullPath(item.PayloadPath);
+            if(!string.Equals(recorded,LocalPayload(item),StringComparison.OrdinalIgnoreCase)&&
+               !string.Equals(recorded,LocalPayload(item,".DesktopNookVault"),StringComparison.OrdinalIgnoreCase))
+                throw new IOException("托管位置无效。");
+            return recorded;
         }
         return Mutable(item)&&item.PayloadLayout=="content-v1"?Path.Combine(ItemDirectory(item),"content",item.FileName):Path.Combine(ItemDirectory(item),item.FileName);
     }
     private static bool Mutable(NookItem item)=>item.Kind is "file" or "folder";
     private static bool Exists(string path)=>File.Exists(path)||Directory.Exists(path);
-    private string LocalPayload(NookItem item)=>Path.GetFullPath(Path.Combine(Path.GetDirectoryName(Path.GetDirectoryName(item.OriginalPath))!,".DesktopNookVault",item.Id,item.FileName));
+    private static string LocalPayload(NookItem item,string folder=".TomatoDesktopVault") =>
+        Path.GetFullPath(Path.Combine(Path.GetDirectoryName(Path.GetDirectoryName(item.OriginalPath))!,folder,item.Id,item.FileName));
     [DllImport("kernel32.dll",CharSet=CharSet.Unicode,SetLastError=true)]private static extern bool MoveFileExW(string source,string destination,uint flags);
     private static void MovePayload(string source,string destination,bool folder)
     {
@@ -72,12 +77,39 @@ public sealed class NookStore
         finally {if(readOnly)File.SetAttributes(destination,attributes);}
     }
     public static void CopyPreservingStreams(string source,string destination)=>CopyDurable(source,destination);
+
+    public static void CopyPayload(string source,string destination)
+    {
+        var attributes=File.GetAttributes(source);
+        if((attributes&FileAttributes.ReparsePoint)!=0)throw new IOException("托管内容包含链接或云占位文件。");
+        if((attributes&FileAttributes.Directory)==0)
+        {
+            CopyDurable(source,destination);
+            return;
+        }
+        Directory.CreateDirectory(destination);
+        foreach(var entry in Directory.EnumerateFileSystemEntries(source))
+            CopyPayload(entry,Path.Combine(destination,Path.GetFileName(entry)));
+    }
+
+    private static bool PayloadMatches(string source,string destination)
+    {
+        if(!Exists(source)||!Exists(destination))return false;
+        var first=File.GetAttributes(source);
+        var second=File.GetAttributes(destination);
+        if(((first|second)&FileAttributes.ReparsePoint)!=0 ||
+           (first&FileAttributes.Directory)!=(second&FileAttributes.Directory))return false;
+        if((first&FileAttributes.Directory)==0)return HashFile(source)==HashFile(destination);
+        var entries=Directory.GetFileSystemEntries(source);
+        return entries.Length==Directory.GetFileSystemEntries(destination).Length &&
+            entries.All(entry=>PayloadMatches(entry,Path.Combine(destination,Path.GetFileName(entry))));
+    }
     // 公共桌面（C:\Users\Public\Desktop）通常只授予普通用户读取权限，能删除自己创建的
     // 快捷方式却不能再创建文件。用一次性探测文件判断真实可写性，比解析 ACL 继承规则可靠。
     public static bool IsWritableDesktop(string root)
     {
         if (string.IsNullOrWhiteSpace(root) || !Directory.Exists(root)) return false;
-        var probe = Path.Combine(root, ".DesktopNook-write-probe-" + Guid.NewGuid().ToString("N"));
+        var probe = Path.Combine(root, ".TomatoDesktop-write-probe-" + Guid.NewGuid().ToString("N"));
         try
         {
             using (var stream = new FileStream(probe, FileMode.CreateNew, FileAccess.Write, FileShare.None)) stream.WriteByte(0);
@@ -208,10 +240,14 @@ public sealed class NookStore
             }
             else throw new IOException("未完成迁移的快捷方式需要人工恢复。原记录已保留：" + ItemDirectory(item));
         }
-        else if (operation.Operation == "restore")
+        else if (operation.Operation is "restore" or "restore-copy")
         {
             if (!IsDesktopPath(operation.Destination) || (!Mutable(item)&&!IsShortcut(operation.Destination))) throw new IOException("恢复目标无效。");
-            if (Mutable(item)?Exists(operation.Destination)&&!Exists(ManagedPath(item)):File.Exists(operation.Destination)&&HashFile(operation.Destination)==item.Hash) { next.Items.RemoveAll(i => i.Id == item.Id); SaveManifest(item, true); }
+            var managed=ManagedPath(item);
+            var restored=operation.Operation=="restore-copy"
+                ? PayloadMatches(managed,operation.Destination)
+                : Mutable(item)?Exists(operation.Destination)&&!Exists(managed):File.Exists(operation.Destination)&&HashFile(operation.Destination)==item.Hash;
+            if (restored) { next.Items.RemoveAll(i => i.Id == item.Id); SaveManifest(item, true); }
             else if (!Exists(ManagedPath(item)) || (!Mutable(item)&&HashFile(ManagedPath(item)) != item.Hash)) throw new IOException("恢复来源需要检查，已保留全部记录。");
         }
         else throw new IOException("未知迁移类型。");
@@ -329,7 +365,27 @@ public sealed class NookStore
         {
             if(!Exists(ManagedPath(item)))throw new IOException("托管文件或文件夹不在原位置，请先检查后再恢复。");
             Begin(new(){Operation="restore",Item=item,Destination=destination});
-            MovePayload(ManagedPath(item),destination,item.Kind=="folder");_checkpoint?.Invoke("destination-created");
+            var managed=ManagedPath(item);
+            try { MovePayload(managed,destination,item.Kind=="folder"); }
+            catch(IOException ex) when((ex.HResult&0xffff)==17)
+            {
+                // An installation may move to another volume. Publish the desktop copy atomically
+                // and retain the managed counterpart for interrupted recovery.
+                WriteAtomic(JournalPath,new Migration{Operation="restore-copy",Item=item,Destination=destination});
+                var staging=Path.Combine(root,".TomatoDesktop-restore-"+Guid.NewGuid().ToString("N"));
+                try
+                {
+                    CopyPayload(managed,staging);
+                    if(!PayloadMatches(managed,staging))throw new IOException("跨盘恢复校验失败，托管内容已保留。");
+                    MovePayload(staging,destination,item.Kind=="folder");
+                }
+                finally
+                {
+                    if(Directory.Exists(staging))Directory.Delete(staging,true);
+                    else File.Delete(staging);
+                }
+            }
+            _checkpoint?.Invoke("destination-created");
             SaveManifest(item,true);var next=Clone(State);next.Items.RemoveAll(i=>i.Id==id);Save(next);_checkpoint?.Invoke("restore-state");End();return destination;
         }
         if (!File.Exists(ManagedPath(item)) || HashFile(ManagedPath(item)) != item.Hash) throw new IOException("托管快捷方式不存在或已改变，请检查数据目录中的副本。");

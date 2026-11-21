@@ -57,7 +57,7 @@ internal static class DataPortability
     public static string Import(NookStore store, StartupOptions options, string source)
     {
         if (!File.Exists(source)) throw new FileNotFoundException("配置包不存在。", source);
-        var temp = Path.Combine(Path.GetTempPath(), "DesktopNook-import-" + Guid.NewGuid().ToString("N"));
+        var temp = Path.Combine(Path.GetTempPath(), "TomatoDesktop-import-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(temp);
         try
         {

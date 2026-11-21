@@ -29,6 +29,7 @@ internal static class ExplorerNavService
     private const string NamespaceLinkKey=@"Software\Microsoft\Windows\CurrentVersion\Explorer\MyComputer\NameSpace\"+NamespaceClsid;
     private const string DesktopIniName = "desktop.ini";
     private static readonly object IconGate=new();
+    private static readonly object SyncGate=new();
     private static bool? _lastQuickPinOk;
     [DllImport("shell32.dll")]
     private static extern void SHChangeNotify(uint eventId,uint flags,IntPtr item1,IntPtr item2);
@@ -138,29 +139,21 @@ internal static class ExplorerNavService
         try{SHChangeNotify(0x08000000,0,IntPtr.Zero,IntPtr.Zero);}catch{}
     }
 
-    // 安装时调用。自检（sandbox）只同步文件，不改动当前用户的快速访问。
-    // 返回值是「固定是否经 Shell 动词确认生效」，安装流程据此留下诊断报告。
-    internal static bool Register(string dataDirectory,NookStore store)
+    // 卸载只清理 Windows 导航入口，保留数据目录及其中的文件。
+    internal static void UnregisterNavigation(string dataDirectory)
     {
+        UnregisterNamespace();
         var folder=FolderPath(dataDirectory);
-        Directory.CreateDirectory(folder);
-        // 先让图标就位再固定：快速访问创建固定项时会取一次图标，晚写容易进图标缓存。
-        EnsureFolderIcon(dataDirectory);
-        Sync(dataDirectory,store);
-        if(App.IsSandbox)return true;
-        // 命名空间项是主交付（Windows 11 上稳定可见），快速访问固定只是尽力而为。
-        var namespaceOk=RegisterNamespace(dataDirectory);
-        _lastQuickPinOk=Pin(folder,true);
-        try{SHChangeNotify(0x08000000,0,IntPtr.Zero,IntPtr.Zero);}catch{/* 刷新失败不影响注册结果 */}
-        return namespaceOk;
+        if(App.IsSandbox||!Directory.Exists(folder))return;
+        // 旧 Windows 的快速访问固定是尽力清理，避免 Shell 忙碌时拖住卸载。
+        try{ShellIntegration.RunStaAsync(()=>Pin(folder,false)).Wait(1500);}catch{}
     }
 
-    // 卸载时调用：取消固定并删除只含快捷方式的展示目录，真实数据完全保留。
+    // 旧版卸载器的恢复命令还会清理生成的展示目录。
     internal static void Unregister(string dataDirectory)
     {
+        UnregisterNavigation(dataDirectory);
         var folder=FolderPath(dataDirectory);
-        UnregisterNamespace();
-        if(!App.IsSandbox)try{Pin(folder,false);}catch{}
         try
         {
             if(Directory.Exists(folder))
@@ -186,19 +179,25 @@ internal static class ExplorerNavService
 
     // 每次数据变更后调用；内容签名未变时直接跳过，避免反复重写几十个 .lnk。
     // 返回写入的快捷方式数量，-1 表示本次被签名短路。
-    internal static int Sync(string dataDirectory,NookStore store)
+    internal static int Sync(string dataDirectory,NookStore store) =>
+        Sync(dataDirectory,ShellIntegration.SnapshotCollectedItems(store));
+
+    internal static int Sync(string dataDirectory,IReadOnlyList<CollectedShellItem> items)
+    {
+        lock(SyncGate)return SyncLinks(dataDirectory,items);
+    }
+
+    private static int SyncLinks(string dataDirectory,IReadOnlyList<CollectedShellItem> items)
     {
         var folder=FolderPath(dataDirectory);
         Directory.CreateDirectory(folder);
         // 升级场景：旧版已经把目录固定到快速访问，启动时靠这里补写图标，不必重新固定。
         EnsureFolderIcon(dataDirectory);
         var entries=new List<(string Link,string Target,string Name)>();
-        foreach(var item in store.State.Items)
+        foreach(var item in items)
         {
-            if(item.Kind=="recycle-bin")continue;
-            string target;
-            try{target=store.ManagedPath(item);}catch{continue;}
-            if(!File.Exists(target)&&!Directory.Exists(target))continue;
+            var target=item.Path;
+            if(target is null||!File.Exists(target)&&!Directory.Exists(target))continue;
             entries.Add((LinkName(item,entries),target,item.Name));
         }
         var signature=string.Join("\n",entries.Select(e=>e.Link+"|"+e.Target+"|"+e.Name));
@@ -240,7 +239,7 @@ internal static class ExplorerNavService
         return expected.Count;
     }
 
-    private static string LinkName(NookItem item,List<(string Link,string Target,string Name)> taken)
+    private static string LinkName(CollectedShellItem item,List<(string Link,string Target,string Name)> taken)
     {
         var name=item.Name;
         foreach(var c in Path.GetInvalidFileNameChars())name=name.Replace(c,'_');

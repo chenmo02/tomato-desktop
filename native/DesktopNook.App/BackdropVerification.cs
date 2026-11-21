@@ -32,9 +32,9 @@ internal static class BackdropVerification
         {
             if (!App.IsSandbox) throw new Exception("背板自检只能在隔离目录运行。");
             window.KeepOpenForVerification = true;
-            // Background 优先于 ContextIdle：等到这里，构造函数里排队的
-            // RefreshGlassWallpaper 已经执行完，看到的是真正的启动态。
+            // 等首帧初始化和后台壁纸加载完成后再读取背景层。
             await window.Dispatcher.InvokeAsync(() => { }, DispatcherPriority.ContextIdle);
+            await window.WallpaperRefreshCompletion.WaitAsync(TimeSpan.FromSeconds(8));
             await Task.Delay(600);
             window.UpdateLayout();
             // RenderTargetBitmap 看不到 DWM 背板，必须抓真实屏幕才能确认是否透出壁纸。

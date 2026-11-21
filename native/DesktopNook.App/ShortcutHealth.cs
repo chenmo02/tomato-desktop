@@ -1,22 +1,19 @@
 using System.IO;
 using System.Runtime.InteropServices;
-using DesktopNook.Core;
 
 namespace DesktopNook.App;
 
 // 失效入口检测：托管副本丢失，或 .lnk 指向的目标已不存在（软件卸载、路径迁移）。
-// 只在 UI 线程（STA）调用，WScript.Shell 解析快捷方式需要 STA 单元。
+// WScript.Shell 解析快捷方式需要 STA 单元。
 internal static class ShortcutHealth
 {
-    public static HashSet<string> Scan(NookStore store)
+    public static HashSet<string> Scan(IReadOnlyList<CollectedShellItem> items)
     {
         var broken = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var item in store.State.Items)
+        foreach (var item in items)
         {
-            if (item.Kind == "recycle-bin") continue;
-            string path;
-            try { path = store.ManagedPath(item); }
-            catch { broken.Add(item.Id); continue; }
+            var path = item.Path;
+            if (path is null) { broken.Add(item.Id); continue; }
             if (!File.Exists(path) && !Directory.Exists(path)) { broken.Add(item.Id); continue; }
             if (item.Kind is "file" or "folder") continue;
             if (!Path.GetExtension(path).Equals(".lnk", StringComparison.OrdinalIgnoreCase)) continue;

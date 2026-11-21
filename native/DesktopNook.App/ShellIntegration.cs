@@ -10,6 +10,8 @@ using DesktopNook.Core;
 
 namespace DesktopNook.App;
 
+internal readonly record struct CollectedShellItem(string Id, string Name, string Kind, string? Path);
+
 internal static class ShellIntegration
 {
     [DllImport("shell32.dll",CharSet=CharSet.Unicode)] private static extern int SetCurrentProcessExplicitAppUserModelID(string id);
@@ -40,13 +42,51 @@ internal static class ShellIntegration
     public static event Action<string>? IconReady;
     internal static IntPtr VerificationDesktopHandle { get; set; }
     public static void SetAppId(string id) => Marshal.ThrowExceptionForHR(SetCurrentProcessExplicitAppUserModelID(id));
-    public static ImageSource AppIcon { get; } = new BitmapImage(new Uri("pack://application:,,,/Assets/AppIcon.png"));
+    public static ImageSource AppIcon { get; } = LoadAppIcon();
+
+    private static BitmapImage LoadAppIcon()
+    {
+        var image=new BitmapImage();
+        image.BeginInit();
+        image.UriSource=new Uri("pack://application:,,,/Assets/AppIcon.png");
+        image.CacheOption=BitmapCacheOption.OnLoad;
+        image.DecodePixelWidth=192;
+        image.EndInit();
+        image.Freeze();
+        return image;
+    }
+
+    internal static CollectedShellItem[] SnapshotCollectedItems(NookStore store)
+    {
+        var items = new List<CollectedShellItem>();
+        foreach (var item in store.State.Items)
+        {
+            if (item.Kind == "recycle-bin") continue;
+            string? path = null;
+            try { path = store.ManagedPath(item); }
+            catch { }
+            items.Add(new CollectedShellItem(item.Id, item.Name, item.Kind, path));
+        }
+        return items.ToArray();
+    }
+
+    internal static Task<T> RunStaAsync<T>(Func<T> work)
+    {
+        var completion = new TaskCompletionSource<T>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var thread = new Thread(() =>
+        {
+            try { completion.SetResult(work()); }
+            catch (Exception ex) { completion.SetException(ex); }
+        }) { IsBackground = true };
+        thread.SetApartmentState(ApartmentState.STA);
+        thread.Start();
+        return completion.Task;
+    }
     internal static string IconKey(string path,bool recycle,int pixels,bool fast)
     {
         string resolved=recycle&&!fast?"::"+WindowsRecycleBin.RecycleId:path;
         return (fast?"fast|":"")+resolved+"|"+pixels;
     }
-    static ShellIntegration(){AppIcon.Freeze();}
     private static void ProcessIconJob(IconJob job)
     {
         try{Icons.Add(job.Key,(job.Fast?SharpIcons.LoadFast(job.Path,job.Pixels):SharpIcons.Load(job.Path,job.Pixels))??AppIcon);}
@@ -73,8 +113,8 @@ internal static class ShellIntegration
 
     internal readonly record struct ResourceSnapshot(int CacheCount,long CacheBytes,long CacheBudget,int ActiveWorkers,int PendingJobs,int LoadingCount,long ProcessedJobs);
     internal static ResourceSnapshot Snapshot()=>new(Icons.Count,Icons.Bytes,Icons.Budget,IconJobs.ActiveWorkers,IconJobs.PendingCount,Loading.Count,IconJobs.ProcessedCount);
-    // 面板收起时调用：把图标缓存压到预算的三分之一左右，UI 仍持有当前显示图标的 Source。
-    internal static void TrimForIdle(double fraction=.35)=>Icons.TrimForIdle(fraction);
+    // 挂起期间仍在解码的任务也受后台预算约束。
+    internal static void SetIconCacheBackground(bool background)=>Icons.SetBudget(background?IconCache.BackgroundBudget:IconCache.DefaultBudget);
     internal static void SetWorkerIdleForVerification(TimeSpan idle)=>IconJobs.SetIdleTimeout(idle);
     internal static void EnqueueForVerification(IconJob job)=>IconJobs.Enqueue(job);
     public static void Launch(NookStore store,NookItem item)

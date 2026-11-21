@@ -1,3 +1,4 @@
+using System.IO;
 using Microsoft.Win32;
 
 namespace DesktopNook.App;
@@ -25,6 +26,17 @@ internal sealed record AppSettings
 internal sealed class StartupOptions(string runKey = @"Software\Microsoft\Windows\CurrentVersion\Run",string settingsKey = @"Software\DesktopNook\Settings")
 {
     private const string ValueName="DesktopNook";
+    private const string ResumeAutostart="ResumeAutostartOnInstall";
+    internal string? ReadDataDirectory()
+    {
+        using var key=Registry.CurrentUser.OpenSubKey(settingsKey);
+        return key?.GetValue("DataDirectory") is string path && Path.IsPathFullyQualified(path) ? path : null;
+    }
+    internal void RememberDataDirectory(string path)
+    {
+        using var key=Registry.CurrentUser.CreateSubKey(settingsKey,true);
+        key.SetValue("DataDirectory",path,RegistryValueKind.String);
+    }
     internal WindowSizePreference ReadWindowSize()
     {
         try{using var key=Registry.CurrentUser.OpenSubKey(settingsKey);return (System.Text.Json.JsonSerializer.Deserialize<WindowSizePreference>(key?.GetValue("WindowSize") as string??"{}")??new()).Validated();}catch{return new();}
@@ -60,8 +72,23 @@ internal sealed class StartupOptions(string runKey = @"Software\Microsoft\Window
         }
         else key.DeleteValue(ValueName,false);
         key.Flush();
+        using var settings=Registry.CurrentUser.OpenSubKey(settingsKey,true);
+        settings?.DeleteValue(ResumeAutostart,false);
     }
-    public void RefreshEnabledPath(){if(Enabled)SetEnabled(true);}
+    public void RefreshEnabledPath()
+    {
+        using var settings=Registry.CurrentUser.OpenSubKey(settingsKey);
+        if(Enabled||settings?.GetValue(ResumeAutostart) is 1)SetEnabled(true);
+    }
+    internal void SuspendAutostartForUninstall()
+    {
+        if(!Enabled)return;
+        using var settings=Registry.CurrentUser.CreateSubKey(settingsKey,true);
+        settings.SetValue(ResumeAutostart,1,RegistryValueKind.DWord);
+        settings.Flush();
+        using var key=Registry.CurrentUser.OpenSubKey(runKey,true);
+        key?.DeleteValue(ValueName,false);
+    }
     internal AppSettings ReadSettings()
     {
         try{using var key=Registry.CurrentUser.OpenSubKey(settingsKey);return System.Text.Json.JsonSerializer.Deserialize<AppSettings>(key?.GetValue("AppSettings") as string??"{}")??new();}catch{return new();}

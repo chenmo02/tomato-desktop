@@ -24,7 +24,7 @@ internal static class LocalUpdater
     internal static (Version Version,bool Installer) Inspect(string path)
     {
         var info=FileVersionInfo.GetVersionInfo(path);
-        if(info.ProductName is not ("DesktopNook" or "番茄桌面"))throw new IOException("请选择番茄桌面的新版本程序或安装包。");
+        if(info.ProductName is not ("DesktopNook" or "TomatoDesktop" or "番茄桌面"))throw new IOException("请选择番茄桌面的新版本程序或安装包。");
         if(!Version.TryParse(info.FileVersion,out var version))throw new IOException("无法读取所选程序版本。");
         version=new Version(version.Major,version.Minor,Math.Max(0,version.Build),Math.Max(0,version.Revision));
         return(version,info.FileDescription?.Contains("安装程序")==true);
@@ -35,9 +35,9 @@ internal static class LocalUpdater
         if(source.Equals(target,StringComparison.OrdinalIgnoreCase))throw new IOException("请选择其他位置的新版本文件。");
         var candidate=Inspect(source);var current=Inspect(target);
         if(candidate.Version<current.Version)throw new IOException("所选版本较旧，请选择当前版本或更新版本。");
-        if(candidate.Installer && (!Path.GetFileName(target).Equals("DesktopNook.exe",StringComparison.OrdinalIgnoreCase)||!File.Exists(Path.Combine(Path.GetDirectoryName(target)!,"卸载番茄桌面.exe"))))throw new IOException("未检测到已安装的番茄桌面，请先运行安装包完成安装，再使用更新包升级。");
+        if(candidate.Installer && (!Path.GetFileName(target).Equals(ApplicationPaths.ExecutableName,StringComparison.OrdinalIgnoreCase)||!File.Exists(Path.Combine(Path.GetDirectoryName(target)!,"卸载番茄桌面.exe"))))throw new IOException("未检测到已安装的番茄桌面，请先运行安装包完成安装，再使用更新包升级。");
         var dir=Path.Combine(dataRoot,"updates",Guid.NewGuid().ToString("N"));Directory.CreateDirectory(dir);
-        var staged=Path.Combine(dir,candidate.Installer?"package.exe":"candidate.exe");var helper=Path.Combine(dir,"DesktopNook.Updater.exe");
+        var staged=Path.Combine(dir,candidate.Installer?"package.exe":"candidate.exe");var helper=Path.Combine(dir,"TomatoDesktop.Updater.exe");
         DesktopNook.Core.NookStore.CopyPreservingStreams(source,staged);DesktopNook.Core.NookStore.CopyPreservingStreams(Environment.ProcessPath!,helper);
         if(Hash(staged)!=Hash(source))throw new IOException("更新文件校验失败，当前程序未更改。");
         // Save metadata only; never duplicate or relocate managed user files/folders during updates.
@@ -62,23 +62,18 @@ internal static class LocalUpdater
             var launchTarget=plan.Target;
             if(plan.Installer)
             {
-                var info=new ProcessStartInfo(plan.Candidate){UseShellExecute=false,CreateNoWindow=true};info.ArgumentList.Add("/S");info.ArgumentList.Add("/D="+Path.GetDirectoryName(plan.Target));using var installer=Process.Start(info)??throw new IOException("未能启动更新包。");installer.WaitForExit();if(installer.ExitCode!=0)throw new IOException("更新包未完成，退出码 "+installer.ExitCode);
-                // 1.2 及更早版本装在 Programs\DesktopNook；新版安装器统一到数据目录并移除旧 EXE。
-                if(!File.Exists(launchTarget)&&plan.Sandbox is null)
-                {
-                    var unified=Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"DesktopNook","DesktopNook.exe");
-                    if(File.Exists(unified))launchTarget=unified;
-                }
+                // NSIS 将 /D= 后面的整段视为路径，即使包含空格也要求放在末尾且不加引号。
+                var info=new ProcessStartInfo(plan.Candidate){UseShellExecute=false,CreateNoWindow=true,Arguments="/S /D="+Path.GetDirectoryName(plan.Target)};using var installer=Process.Start(info)??throw new IOException("未能启动更新包。");installer.WaitForExit();if(installer.ExitCode!=0)throw new IOException("更新包未完成，退出码 "+installer.ExitCode);
                 if(Inspect(launchTarget).Version<candidate.Version)throw new IOException("安装包未更新到目标版本。");
             }
             else
             {
                 // Rename first: handles Explorer mapping an old icon resource without overwriting it.
-                backup=Path.Combine(Path.GetDirectoryName(plan.Target)!,".DesktopNook-previous-"+Guid.NewGuid().ToString("N")+".exe");
+                backup=Path.Combine(Path.GetDirectoryName(plan.Target)!,".TomatoDesktop-previous-"+Guid.NewGuid().ToString("N")+".exe");
                 File.Move(plan.Target,backup,false);
                 try{DesktopNook.Core.NookStore.CopyPreservingStreams(plan.Candidate,plan.Target);if(Hash(plan.Target)!=plan.CandidateHash)throw new IOException("新版程序校验失败。");replaced=true;}
                 catch{if(File.Exists(plan.Target))File.Move(plan.Target,plan.Target+".failed-"+Guid.NewGuid().ToString("N"));File.Move(backup,plan.Target);backup="";throw;}
-                var key=Microsoft.Win32.Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Uninstall\DesktopNook",true);
+                var key=Microsoft.Win32.Registry.CurrentUser.OpenSubKey(ApplicationPaths.InstallKey,true);
                 using(key){if(string.Equals(key?.GetValue("InstallLocation") as string,Path.GetDirectoryName(plan.Target),StringComparison.OrdinalIgnoreCase))key!.SetValue("DisplayVersion",plan.Version);}
             }
             var start=new ProcessStartInfo(launchTarget){UseShellExecute=false,WorkingDirectory=Path.GetDirectoryName(launchTarget)!};
